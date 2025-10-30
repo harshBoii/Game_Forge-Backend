@@ -2,3 +2,8 @@ fastapi
 uvicorn
 openai
 python-dotenv
+langgraph
+langchain-google-genai
+pydantic
+httpx
+starlette
