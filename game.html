@@ -2,505 +2,455 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="utf-8">
-<title>Dead End Defense</title>
-<style>
-body { margin: 0; padding: 0; background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; }
-#game { border: 2px solid #333; }
-</style>
-<script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+    <title>Untitled Game</title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; overflow: hidden; background-color: #000000; }
+    </style>
 </head>
 <body>
-<div id="game"></div>
+
 <script>
-
-// ═══════════════════════════════════════════════════════════
-// GLOBAL VARIABLES (Always declare these)
-// ═══════════════════════════════════════════════════════════
-var gameScene;  // Scene reference for callbacks
-var player;     // Main player entity
-var entities;   // Group for enemies/obstacles/collectibles (Zombies)
-var projectiles; // Group for bullets/thrown objects
-var platforms;  // Group for ground/platforms
-var base;       // The base to defend
-
-// Game state
-var score = 0;
-var health = 100; // Player health
-var baseHealth = 100; // Base health
-var level = 1;
-var gameOver = false;
-
-// UI elements
-var scoreText, healthText, baseHealthText, levelText, instructionsText;
-
-// Input
-var keys;  // Keyboard input object
-
-// FIX: Wave Management Variables
-var totalZombiesForCurrentWave = 0; // Total zombies to spawn for the current wave
-var zombiesCurrentlySpawning = 0; // Zombies that are *currently* being spawned by timer
-var waveSpawnEvent = null; // Reference to the timed event for spawning zombies
-
-// FIX: Player Invulnerability
-var playerIsInvulnerable = false; // Tracks if player is temporarily invulnerable after taking damage
-
-// ═══════════════════════════════════════════════════════════
-// PHASER CONFIGURATION
-// ═══════════════════════════════════════════════════════════
-var config = {
-    type: Phaser.AUTO,
-    width: 800,
-    height: 600,
-    parent: 'game',
-    physics: {
-        default: 'arcade',
-        arcade: {
-            gravity: { y: 300 },  // ADAPT: Set to 300+ for platformers, 0 for top-down - Adapted for side-scrolling platformer
-            debug: false
+    // Game configuration
+    const config = {
+        type: Phaser.AUTO,
+        width: 800,
+        height: 600,
+        backgroundColor: '#000000', // Black background as per color palette
+        physics: {
+            default: 'arcade',
+            arcade: {
+                gravity: { y: 0 }, // No gravity in this arcade game
+                debug: false // Set to true to visualize physics bodies for debugging
+            }
         }
-    },
-    scene: {
-        preload: preload,
-        create: create,
-        update: update
-    }
-};
+        // The 'scene' property referencing global functions (preload, create, update)
+        // is semantically incorrect when using a class-based scene.
+        // It's removed because game.scene.add('GameScene', GameScene, true); explicitly
+        // starts the GameScene class.
+    };
 
-var game = new Phaser.Game(config);
+    // Game variables (declared globally for easy access within the scene)
+    let player; // The physics sprite for the player
+    let playerGraphics; // The graphics object that draws the player's visual
+    let playerHealth = 100;
+    let score = 0;
+    let healthText;
+    let scoreText;
+    let gameOverText;
+    let restartText;
+    let enemies; // Phaser Group for enemy physics sprites
+    let projectiles; // Phaser Group for projectile physics sprites
+    let cursors; // Input handler for WASD and Spacebar
+    let lastFired = 0; // Timestamp for controlling player fire rate
+    const PLAYER_FIRE_RATE = 200; // milliseconds between shots
+    const PLAYER_SPEED = 200; // pixels per second
+    const PROJECTILE_SPEED = 400; // pixels per second
+    const ENEMY_SPEED = 50; // pixels per second
+    const ENEMY_SPAWN_RATE = 1500; // milliseconds between enemy spawns
+    let lastEnemySpawn = 0; // Timestamp for controlling enemy spawn rate
+    let isGameOver = false; // Flag to track game state
+    let explosionParticles; // Particle emitter for explosions
 
-// ═══════════════════════════════════════════════════════════
-// PRELOAD: Create Visible Sprites
-// ═══════════════════════════════════════════════════════════
+    // --- Custom Graphics Functions for Procedural Characters ---
 
-// DYNAMIC VISUAL ADAPTATION
-function generateSprite(scene, key, type) {
-  const g = scene.make.graphics({ x: 0, y: 0, add: false });
-  
-  if (type === "survivor") {
-    // Survivor: Dark, gritty human figure, comic book style
-    g.lineStyle(2, 0x000000, 1); // Strong black linework
-    g.fillStyle(0x444444); // Dark gray for clothing
-    g.fillRect(12, 10, 8, 20); // Body
-    g.fillStyle(0x666666); // Lighter gray for head
-    g.fillCircle(16, 8, 6); // Head
-    g.strokeRect(12, 10, 8, 20);
-    g.strokeCircle(16, 8, 6);
-    // Simple arms (optional)
-    g.lineStyle(1, 0x000000, 1);
-    g.strokeLine(12, 12, 8, 18);
-    g.strokeLine(20, 12, 24, 18);
-  }
-  else if (type === "shambler") {
-    // Zombie Shambler: Desaturated, tattered look, hunched
-    g.lineStyle(2, 0x000000, 1); // Strong linework
-    g.fillStyle(0x556655); // Desaturated green-gray for skin
-    g.fillRect(10, 12, 12, 18); // Body
-    g.fillStyle(0x445544); // Darker green-gray for head
-    g.fillCircle(16, 10, 5); // Head
-    // Tattered clothing details
-    g.fillStyle(0x333333); // Darker color for tattered bits
-    g.fillRect(8, 18, 4, 4);
-    g.fillRect(20, 22, 4, 4);
-    g.strokeRect(10, 12, 12, 18);
-    g.strokeCircle(16, 10, 5);
-    // Hunched arms
-    g.lineStyle(1, 0x000000, 1);
-    g.strokeLine(10, 15, 6, 22);
-    g.strokeLine(22, 15, 26, 22);
-  }
-  else if (type === "bullet") {
-    // Bullet: Simple, fast-looking projectile, red streak
-    g.fillStyle(0xdd0000); // Vibrant red for blood/impact
-    g.fillRect(0, 14, 32, 4); // Horizontal line
-    g.lineStyle(1, 0xffffff, 0.7); // Faint white trail
-    g.beginPath();
-    g.moveTo(0, 16);
-    g.lineTo(32, 16);
-    g.strokePath();
-  }
-  else if (type === "fortress") {
-    // Base: Barricades, broken wood, gritty look
-    g.lineStyle(2, 0x000000, 1); // Strong linework
-    g.fillStyle(0x665544); // Wood/earth tones
-    g.fillRect(0, 16, 32, 16); // Bottom barricade
-    g.fillRect(8, 8, 16, 10); // Upper section
-    g.fillStyle(0x443322); // Darker accents for texture
-    g.fillRect(4, 20, 8, 12);
-    g.fillRect(20, 20, 8, 12);
-    g.strokeRect(0, 16, 32, 16);
-    g.strokeRect(8, 8, 16, 10);
-    g.strokeRect(4, 20, 8, 12);
-    g.strokeRect(20, 20, 8, 12);
-  }
-  else if (type === "ground") {
-    // Ground: Dark, cracked earth
-    g.fillStyle(0x302010); // Dark brown earth
-    g.fillRect(0, 0, 32, 32);
-    g.lineStyle(1, 0x403020, 1); // Lighter brown for cracks
-    g.beginPath();
-    g.moveTo(5, 5); g.lineTo(10, 0); g.lineTo(15, 10);
-    g.moveTo(20, 8); g.lineTo(25, 2); g.lineTo(30, 12);
-    g.moveTo(10, 20); g.lineTo(0, 25); g.lineTo(12, 32);
-    g.strokePath();
-  }
-  else {
-    // Default (fallback)
-    g.fillStyle(0xff00ff);
-    g.fillCircle(16, 16, 14);
-    g.lineStyle(3, 0xffffff, 0.7);
-    g.strokeCircle(16, 16, 14);
-  }
+    /**
+     * Draws a player character shape onto a Phaser.GameObjects.Graphics object.
+     * The character is drawn centered around (0,0) of the graphics object.
+     * @param {Phaser.GameObjects.Graphics} graphics - The graphics object to draw on.
+     * @param {number} size - Base size for the character.
+     */
+    function drawPlayerCharacter(graphics, size = 20) {
+        graphics.clear(); // Clear previous drawings from this graphics object
+        graphics.fillStyle(0xFFFFFF, 1); // White color for the character
 
-  g.generateTexture(key, 32, 32);
-  g.destroy();
-}
+        // Body (rounded rectangle) - centered at (0,0)
+        graphics.fillRoundedRect(-size, -size, size * 2, size * 2, size * 0.5);
 
-// Background generation for a dark, gritty scene
-function generateBackground(scene, key) {
-    const g = scene.make.graphics({ x: 0, y: 0, add: false });
-    const width = 800;
-    const height = 600;
+        // Head (circle on top of body)
+        graphics.fillCircle(0, -size * 1.2, size * 0.8);
 
-    // Base dark, desaturated color for a grim sky
-    g.fillStyle(0x222222);
-    g.fillRect(0, 0, width, height);
+        // Eyes (two small black circles on head)
+        graphics.fillStyle(0x000000, 1); // Black for eyes
+        graphics.fillCircle(-size * 0.3, -size * 1.3, size * 0.15);
+        graphics.fillCircle(size * 0.3, -size * 1.3, size * 0.15);
+        graphics.fillStyle(0xFFFFFF, 1); // Reset to white
 
-    // Gritty texture / noise (subtle grain)
-    for (let i = 0; i < 500; i++) {
-        const x = Phaser.Math.Between(0, width);
-        const y = Phaser.Math.Between(0, height);
-        const color = Phaser.Math.Between(0x111111, 0x333333);
-        g.fillStyle(color, 0.5);
-        g.fillRect(x, y, 1, 1);
+        // Arms (rounded rectangles, slightly extended)
+        graphics.fillRoundedRect(-size * 1.5, -size * 0.5, size * 0.6, size * 1.5, size * 0.3); // Left arm
+        graphics.fillRoundedRect(size * 0.9, -size * 0.5, size * 0.6, size * 1.5, size * 0.3); // Right arm
+
+        // Legs (rounded rectangles, slightly extended)
+        graphics.fillRoundedRect(-size * 0.7, size * 0.8, size * 0.5, size * 1.2, size * 0.3); // Left leg
+        graphics.fillRoundedRect(size * 0.2, size * 0.8, size * 0.5, size * 1.2, size * 0.3); // Right leg
     }
 
-    // Silhouetted distant ruined buildings/trees (comic book style)
-    g.fillStyle(0x111111); // Very dark gray for silhouettes
-    g.beginPath();
-    g.moveTo(0, height);
-    g.lineTo(0, height - 100);
-    g.lineTo(50, height - 150);
-    g.lineTo(100, height - 80);
-    g.lineTo(180, height - 120);
-    g.lineTo(250, height - 90);
-    g.lineTo(300, height - 180);
-    g.lineTo(350, height - 100);
-    g.lineTo(400, height - 140);
-    g.lineTo(500, height - 80);
-    g.lineTo(600, height - 160);
-    g.lineTo(700, height - 90);
-    g.lineTo(800, height - 120);
-    g.lineTo(800, height);
-    g.closePath();
-    g.fillPath();
-    
-    // Add some subtle, desaturated clouds/smoke in the sky
-    g.fillStyle(0x333333, 0.6); // Dark, muted clouds
-    g.fillEllipse(150, 100, 120, 60);
-    g.fillEllipse(400, 80, 150, 70);
-    g.fillEllipse(650, 110, 100, 50);
+    /**
+     * Draws an enemy character shape onto a Phaser.GameObjects.Graphics object.
+     * The character is drawn centered around (0,0) of the graphics object.
+     * @param {Phaser.GameObjects.Graphics} graphics - The graphics object to draw on.
+     * @param {number} size - Base size for the character.
+     */
+    function drawEnemyCharacter(graphics, size = 15) {
+        graphics.clear(); // Clear previous drawings
+        graphics.fillStyle(0xFFFFFF, 1); // White color for enemies
 
-    g.generateTexture(key, width, height);
-    g.destroy();
-}
+        // Main body (more organic, spiky shape) - centered at (0,0)
+        graphics.beginPath();
+        graphics.moveTo(0, -size); // Top point
+        graphics.lineTo(size * 0.5, -size * 0.8);
+        graphics.lineTo(size, 0); // Right point
+        graphics.lineTo(size * 0.8, size * 0.5);
+        graphics.lineTo(0, size); // Bottom point
+        graphics.lineTo(-size * 0.8, size * 0.5);
+        graphics.lineTo(-size, 0); // Left point
+        graphics.lineTo(-size * 0.5, -size * 0.8);
+        graphics.closePath();
+        graphics.fillPath();
 
-function preload() {
-    // Generate sprites for game entities
-    generateSprite(this, 'player', 'survivor');
-    generateSprite(this, 'zombie', 'shambler');
-    generateSprite(this, 'bullet', 'bullet');
-    generateSprite(this, 'base', 'fortress');
-    generateSprite(this, 'ground', 'ground'); // For the main ground platform
-    generateBackground(this, 'background'); // Custom background
-}
-
-
-// ═══════════════════════════════════════════════════════════
-// CREATE: Game Initialization
-// ═══════════════════════════════════════════════════════════
-function create() {
-    gameScene = this;  // DO NOT CHANGE: Store scene reference
-    
-    // Add the generated background
-    this.add.image(400, 300, 'background');
-
-    // Create platforms group for player and zombies to walk on
-    platforms = this.physics.add.staticGroup();
-    // Create a wide ground platform at the bottom of the screen
-    platforms.create(400, 584, 'ground').setScale(25, 1).refreshBody(); 
-    
-    // Base setup: Positioned on the left side of the screen
-    base = this.physics.add.sprite(80, 568, 'base'); // FIX: Adjusted Y-coordinate to align with ground
-    base.body.setAllowGravity(false); // Base is static and not affected by gravity
-    base.setImmovable(true); // Base cannot be moved by collisions
-    base.setOrigin(0.5, 1); // Anchor at bottom center for easier placement on ground
-    base.body.setSize(32, 32); // Adjust hitbox for better interaction (FIXED)
-    base.body.setOffset(0, 0); // Adjust hitbox offset if needed (FIXED) - Set to 0,0 to align with origin
-    base.health = baseHealth; // Store base health property
-    
-    // Player setup: Spawned on the ground, slightly right of the base
-    player = this.physics.add.sprite(200, 450, 'player'); 
-    player.setCollideWorldBounds(true); // Player cannot leave the game screen
-    player.setBounce(0.1); // Small bounce effect
-    player.body.setSize(20, 30); // Adjust player hitbox
-    player.body.setOffset(6, 2); // Adjust player hitbox offset
-    
-    // Groups for managing game objects
-    entities = this.physics.add.group(); // Group for zombie enemies
-    projectiles = this.physics.add.group(); // Group for player bullets
-    
-    // ADAPT INPUT: Keyboard controls for movement, jump, and shoot
-    keys = this.input.keyboard.addKeys({
-        W: 'W',     // Jump
-        A: 'A',     // Move Left
-        S: 'S',     // (Not used in this side-scroller, but included from template)
-        D: 'D',     // Move Right
-        SPACE: 'SPACE', // Shoot (FIX: Now only shoot)
-        UP: 'UP',   // Jump
-        DOWN: 'DOWN', // (Not used)
-        LEFT: 'LEFT', // Move Left
-        RIGHT: 'RIGHT' // Move Right
-    });
-    
-    // Collisions setup
-    this.physics.add.collider(player, platforms); // Player collides with the ground
-    this.physics.add.collider(entities, platforms); // Zombies collide (walk) on the ground
-    this.physics.add.collider(base, platforms); // Base sits on the ground
-
-    // Overlap callbacks for interactions
-    this.physics.add.overlap(player, entities, handlePlayerEntityCollision, null, this); // Player takes damage from zombies
-    this.physics.add.overlap(projectiles, entities, handleProjectileEntityCollision, null, this); // Bullets destroy zombies
-    this.physics.add.overlap(entities, base, handleZombieBaseCollision, null, this); // Zombies damage the base
-    
-    // UI elements setup with comic book styling (bold font)
-    scoreText = this.add.text(16, 16, 'Score: 0', { fontSize: '24px', fill: '#fff', fontStyle: 'bold' });
-    healthText = this.add.text(16, 48, 'Player Health: 100', { fontSize: '20px', fill: '#0f0', fontStyle: 'bold' });
-    baseHealthText = this.add.text(16, 76, 'Base Health: 100', { fontSize: '20px', fill: '#00f', fontStyle: 'bold' });
-    levelText = this.add.text(16, 104, 'Wave: 1', { fontSize: '20px', fill: '#ff0', fontStyle: 'bold' });
-    
-    // ADAPT: Instruction text reflecting current controls (FIX: Updated for separate jump/shoot)
-    instructionsText = this.add.text(550, 16, 
-        'A/D or \u2190/\u2192: Move\nW/\u2191: Jump\nSPACE: Shoot', // Updated instructions for side-scroller
-        { fontSize: '16px', fill: '#aaa', align: 'right' }
-    );
-    
-    // FIX: Initialize invulnerability state
-    playerIsInvulnerable = false;
-
-    // ADAPT: Start the first wave of zombies (FIX: No continuous loop here)
-    startWave();
-}
-
-// ═══════════════════════════════════════════════════════════
-// UPDATE: Main Game Loop
-// ═══════════════════════════════════════════════════════════
-function update(time, delta) {
-    if (gameOver) return;
-    
-    // ADAPT MOVEMENT: Option 2: Platformer movement for player
-    player.setVelocityX(0); // Stop horizontal movement if no key is pressed
-    if (keys.A.isDown || keys.LEFT.isDown) {
-        player.setVelocityX(-160); // Move left
-        player.flipX = true; // Face left
-    } else if (keys.D.isDown || keys.RIGHT.isDown) {
-        player.setVelocityX(160); // Move right
-        player.flipX = false; // Face right
+        // Eye (single, angry-looking black eye)
+        graphics.fillStyle(0x000000, 1); // Black for eye
+        graphics.fillCircle(0, -size * 0.3, size * 0.2); // Center eye
+        graphics.fillStyle(0xFFFFFF, 1); // Reset to white
     }
-    
-    // Jump: Player can jump if on the ground (FIX: Removed SPACE from jump input)
-    if ((keys.W.isDown || keys.UP.isDown) && player.body.touching.down) {
-        player.setVelocityY(-330); // Apply upward velocity for jump
+
+    /**
+     * Draws a projectile shape onto a Phaser.GameObjects.Graphics object.
+     * The projectile is drawn centered around (0,0) of the graphics object.
+     * @param {Phaser.GameObjects.Graphics} graphics - The graphics object to draw on.
+     * @param {number} size - Base size for the projectile.
+     */
+    function drawProjectile(graphics, size = 5) {
+        graphics.clear(); // Clear previous drawings
+        graphics.fillStyle(0xFFFFFF, 1); // White color for projectiles
+
+        // Elongated diamond/rocket shape - centered at (0,0)
+        graphics.beginPath();
+        graphics.moveTo(0, -size * 1.5); // Top tip
+        graphics.lineTo(size * 0.5, 0);
+        graphics.lineTo(0, size * 1.5); // Bottom tip
+        graphics.lineTo(-size * 0.5, 0);
+        graphics.closePath();
+        graphics.fillPath();
     }
-    
-    // ADAPT AI: Zombie behavior - relentlessly advance towards the base
-    entities.getChildren().forEach(function(entity) {
-        // Zombies move towards the base's X position
-        gameScene.physics.moveToObject(entity, base, 50 + (level * 5)); // Speed increases with wave level
-        
-        // Flip zombie sprite to face the base
-        if (entity.x > base.x) {
-            entity.flipX = true; // Zombie faces left if it's to the right of the base
-        } else {
-            entity.flipX = false; // Zombie faces right if it's to the left of the base
+
+    // Main game scene class
+    class GameScene extends Phaser.Scene {
+        constructor() {
+            super({ key: 'GameScene' });
         }
-    });
-    
-    // ADAPT ACTION: Player shooting (FIX: SPACE is now only for shooting)
-    // Player shoots horizontally based on their current facing direction
-    if (keys.SPACE.isDown && time > (player.lastFired || 0) + 300) { // Rate limit for shooting
-        fireProjectile();
-        player.lastFired = time;
-    }
-    
-    // Cleanup off-screen projectiles to prevent memory leaks
-    projectiles.getChildren().forEach(function(proj) {
-        if (proj.x < -50 || proj.x > 850 || proj.y < -50 || proj.y > 650) proj.destroy();
-    });
-}
 
-// ═══════════════════════════════════════════════════════════
-// INPUT HANDLERS (Removed mouse pointerdown for shooting as per side-scroller genre)
-// ═══════════════════════════════════════════════════════════
-// function handlePointerDown(pointer) { /* Removed */ }
+        preload() {
+            // No external assets to load as everything is drawn procedurally
+        }
 
-// ═══════════════════════════════════════════════════════════
-// GAME MECHANICS
-// ═══════════════════════════════════════════════════════════
-// FIX: Refactored startWave for proper wave progression
-function startWave() {
-    levelText.setText('Wave: ' + level);
+        create() {
+            // --- Game State Initialization ---
+            playerHealth = 100;
+            score = 0;
+            isGameOver = false;
+            lastFired = 0;
+            lastEnemySpawn = 0;
 
-    // Stop any active spawning event from the previous wave
-    if (waveSpawnEvent) {
-        waveSpawnEvent.destroy();
-        waveSpawnEvent = null;
-    }
+            // --- Player Setup ---
+            // Create a Graphics object for the player's visual appearance
+            playerGraphics = this.add.graphics();
+            // Create an invisible physics sprite for player collision and movement
+            player = this.physics.add.sprite(config.width / 2, config.height - 50);
+            player.setOrigin(0.5, 0.5); // Center the physics body
+            player.body.setCollideWorldBounds(true); // Player stays within screen bounds
+            player.body.setSize(40, 40); // Set a reasonable collision box size
+            player.body.setOffset(-20, -20); // Adjust offset to center the body on the visual character
+            drawPlayerCharacter(playerGraphics, 20); // Initial draw of the player character
 
-    totalZombiesForCurrentWave = level * 2 + 3; // Calculate total zombies for this wave
-    zombiesCurrentlySpawning = totalZombiesForCurrentWave; // Track how many zombies are left to *spawn*
+            // --- Enemy Group Setup ---
+            enemies = this.physics.add.group({
+                classType: Phaser.GameObjects.Sprite, // Enemies are physics sprites
+                runChildUpdate: true // Allows individual enemy sprites to update (though not used for movement directly here)
+            });
 
-    if (totalZombiesForCurrentWave > 0) {
-        // Schedule spawning of zombies over time
-        waveSpawnEvent = gameScene.time.addEvent({
-            delay: Math.max(500, Phaser.Math.Between(1500, 2500) - (level * 50)), // Spawn frequency, faster for higher levels (min 500ms)
-            callback: function() {
-                if (zombiesCurrentlySpawning > 0) {
-                    spawnEntity();
-                    zombiesCurrentlySpawning--; // Decrement the count of zombies remaining to be spawned
-                } else {
-                    // All zombies for this wave have been queued for spawning.
-                    // The timer can now stop.
-                    if (waveSpawnEvent) {
-                        waveSpawnEvent.destroy();
-                        waveSpawnEvent = null;
-                    }
+            // --- Projectile Group Setup ---
+            projectiles = this.physics.add.group({
+                classType: Phaser.GameObjects.Sprite, // Projectiles are physics sprites
+                maxSize: 10, // Limit active projectiles to improve performance
+                runChildUpdate: true
+            });
+
+            // --- UI Text Setup ---
+            scoreText = this.add.text(16, 16, 'Score: 0', { fontSize: '24px', fill: '#FFFFFF' });
+            healthText = this.add.text(config.width - 16, 16, 'Health: 100', { fontSize: '24px', fill: '#FFFFFF' }).setOrigin(1, 0);
+
+            // --- Game Over Text Setup (initially hidden) ---
+            gameOverText = this.add.text(config.width / 2, config.height / 2 - 50, 'GAME OVER', { fontSize: '48px', fill: '#FFFFFF' }).setOrigin(0.5);
+            gameOverText.setVisible(false);
+            restartText = this.add.text(config.width / 2, config.height / 2 + 20, 'Press R to Restart', { fontSize: '24px', fill: '#FFFFFF' }).setOrigin(0.5);
+            restartText.setVisible(false);
+
+            // --- Input Controls Setup (WASD + Spacebar for fire, R for restart) ---
+            cursors = this.input.keyboard.addKeys({
+                up: 'W',
+                down: 'S',
+                left: 'A',
+                right: 'D',
+                fire: 'SPACE',
+                restart: 'R'
+            });
+
+            // --- Collision Handlers ---
+            // Player vs. Enemies: Calls hitPlayer when collision occurs
+            this.physics.add.collider(player, enemies, this.hitPlayer, null, this);
+            // Projectiles vs. Enemies: Calls hitEnemy when collision occurs
+            this.physics.add.collider(projectiles, enemies, this.hitEnemy, null, this);
+
+            // --- Particle Emitter Setup for Explosions ---
+            // Changed 'pixel' to '__DEFAULT' and removed 'frame' as suggested.
+            // '__DEFAULT' is a built-in white pixel texture that Phaser always provides,
+            // preventing the "texture key not loaded" error. The custom onParticleRender
+            // callback handles the actual drawing, making the base texture irrelevant
+            // for visual output but necessary for initialization.
+            explosionParticles = this.add.particles(0, 0, '__DEFAULT', {
+                lifespan: 500, // Particles last for 500ms
+                speed: { min: 50, max: 150 }, // Random speed for particles
+                angle: { min: 0, max: 360 }, // Emit in all directions
+                gravityY: 0, // No gravity
+                scale: { start: 0.5, end: 0 }, // Particles shrink over time
+                quantity: 15, // Number of particles per burst
+                blendMode: 'ADD', // Additive blending for a glowing effect
+                on: false // Emitter starts off, will be triggered manually
+            });
+
+            // Custom rendering for particles to draw white circles
+            explosionParticles.manager.emitters.list[0].onParticleRender = (particle, context) => {
+                context.fillStyle = '#FFFFFF'; // White color for particles
+                context.beginPath();
+                // Draw a circle at the particle's local coordinates, scaled by its current scale
+                context.arc(particle.x, particle.y, particle.scale * 5, 0, Math.PI * 2);
+                context.fill();
+            };
+        }
+
+        update(time, delta) {
+            // If game is over, only check for restart input
+            if (isGameOver) {
+                if (cursors.restart.isDown) {
+                    this.scene.restart(); // Restart the current scene
                 }
-            },
-            loop: true, // Keep looping until all zombies for the wave have been spawned
-            callbackScope: gameScene // Ensure 'this' refers to the scene correctly in callback
-        });
+                return; // Stop further update logic
+            }
+
+            // --- Player Movement ---
+            player.body.setVelocity(0); // Reset velocity each frame to stop movement when keys are released
+
+            if (cursors.left.isDown) {
+                player.body.setVelocityX(-PLAYER_SPEED);
+            } else if (cursors.right.isDown) {
+                player.body.setVelocityX(PLAYER_SPEED);
+            }
+
+            if (cursors.up.isDown) {
+                player.body.setVelocityY(-PLAYER_SPEED);
+            } else if (cursors.down.isDown) {
+                player.body.setVelocityY(PLAYER_SPEED);
+            }
+
+            // Update the player's visual position to match its physics body
+            playerGraphics.x = player.x;
+            playerGraphics.y = player.y;
+
+            // --- Player Firing ---
+            if (cursors.fire.isDown && time > lastFired + PLAYER_FIRE_RATE) {
+                this.fireProjectile(player.x, player.y - 20); // Fire projectile from player's top
+                lastFired = time; // Update last fired timestamp
+            }
+
+            // --- Enemy Spawning ---
+            if (time > lastEnemySpawn + ENEMY_SPAWN_RATE) {
+                this.spawnEnemy();
+                lastEnemySpawn = time; // Update last enemy spawn timestamp
+            }
+
+            // --- Update Enemies (move towards player and update visuals) ---
+            enemies.children.each(function(enemy) {
+                if (enemy.active) {
+                    // Move enemy towards the player
+                    this.physics.moveToObject(enemy, player, ENEMY_SPEED);
+
+                    // Ensure enemy has a graphics object and update its position
+                    if (!enemy.graphics) {
+                        enemy.graphics = this.add.graphics();
+                        drawEnemyCharacter(enemy.graphics, 15); // Draw character once when activated
+                    }
+                    enemy.graphics.x = enemy.x;
+                    enemy.graphics.y = enemy.y;
+                } else if (enemy.graphics) {
+                    // Clear enemy drawing when it's inactive
+                    enemy.graphics.clear();
+                }
+            }, this);
+
+            // --- Update Projectiles (move upwards and update visuals) ---
+            projectiles.children.each(function(projectile) {
+                if (projectile.active) {
+                    // Deactivate projectile if it goes off-screen
+                    if (projectile.y < 0) {
+                        projectile.disableBody(true, true);
+                    }
+
+                    // Ensure projectile has a graphics object and update its position
+                    if (!projectile.graphics) {
+                        projectile.graphics = this.add.graphics();
+                        drawProjectile(projectile.graphics, 5); // Draw projectile once when activated
+                    }
+                    projectile.graphics.x = projectile.x;
+                    projectile.graphics.y = projectile.y;
+                } else if (projectile.graphics) {
+                    // Clear projectile drawing when it's inactive
+                    projectile.graphics.clear();
+                }
+            }, this);
+        }
+
+        /**
+         * Fires a projectile from the given coordinates.
+         * @param {number} x - X coordinate to spawn the projectile.
+         * @param {number} y - Y coordinate to spawn the projectile.
+         */
+        fireProjectile(x, y) {
+            // Get an inactive projectile from the group (or create a new one if group isn't full)
+            let projectile = projectiles.get(x, y);
+
+            if (projectile) {
+                // Activate the projectile and enable its physics body
+                projectile.setActive(true).setVisible(true);
+                projectile.body.enable = true;
+                projectile.body.reset(x, y); // Reset position
+
+                // Set projectile velocity to move upwards
+                projectile.body.setVelocityY(-PROJECTILE_SPEED);
+                // Set collision box size and offset for the visual shape
+                projectile.body.setSize(10, 30);
+                projectile.body.setOffset(-5, -15);
+
+                // Ensure it has a graphics object and draw it
+                if (!projectile.graphics) {
+                    projectile.graphics = this.add.graphics();
+                }
+                drawProjectile(projectile.graphics, 5);
+                projectile.graphics.x = projectile.x;
+                projectile.graphics.y = projectile.y;
+            }
+        }
+
+        /**
+         * Spawns an enemy at a random X position at the top of the screen.
+         */
+        spawnEnemy() {
+            // Get an inactive enemy from the group (or create a new one)
+            let enemy = enemies.get(Phaser.Math.Between(50, config.width - 50), 0); // Spawn at random X, top of screen
+
+            if (enemy) {
+                // Activate the enemy and enable its physics body
+                enemy.setActive(true).setVisible(true);
+                enemy.body.enable = true;
+                enemy.body.reset(enemy.x, enemy.y); // Reset position
+
+                // Set initial velocity (will be overridden by moveToObject in update)
+                enemy.body.setVelocityY(ENEMY_SPEED);
+                // Set collision box (circle for rounded enemy) and offset
+                enemy.body.setCircle(15);
+                enemy.body.setOffset(-15, -15);
+
+                // Ensure it has a graphics object and draw it
+                if (!enemy.graphics) {
+                    enemy.graphics = this.add.graphics();
+                }
+                drawEnemyCharacter(enemy.graphics, 15);
+                enemy.graphics.x = enemy.x;
+                enemy.graphics.y = enemy.y;
+            }
+        }
+
+        /**
+         * Handler for when the player collides with an enemy.
+         * @param {Phaser.GameObjects.Sprite} playerSprite - The player's physics sprite.
+         * @param {Phaser.GameObjects.Sprite} enemy - The enemy physics sprite.
+         */
+        hitPlayer(playerSprite, enemy) {
+            if (isGameOver) return; // Prevent multiple game over triggers
+
+            enemy.disableBody(true, true); // Deactivate enemy and remove from display
+            if (enemy.graphics) {
+                enemy.graphics.clear(); // Clear enemy visual drawing
+            }
+
+            playerHealth -= 20; // Reduce player health
+            healthText.setText('Health: ' + playerHealth);
+
+            // Emit explosion particles at the player's position
+            explosionParticles.emitParticleAt(playerSprite.x, playerSprite.y);
+
+            if (playerHealth <= 0) {
+                this.gameOver(); // Trigger game over sequence
+            }
+        }
+
+        /**
+         * Handler for when a projectile hits an enemy.
+         * @param {Phaser.GameObjects.Sprite} projectile - The projectile physics sprite.
+         * @param {Phaser.GameObjects.Sprite} enemy - The enemy physics sprite.
+         */
+        hitEnemy(projectile, enemy) {
+            // Deactivate both projectile and enemy
+            projectile.disableBody(true, true);
+            if (projectile.graphics) {
+                projectile.graphics.clear(); // Clear projectile visual drawing
+            }
+
+            enemy.disableBody(true, true);
+            if (enemy.graphics) {
+                enemy.graphics.clear(); // Clear enemy visual drawing
+            }
+
+            score += 10; // Increase score
+            scoreText.setText('Score: ' + score);
+
+            // Emit explosion particles at the enemy's position
+            explosionParticles.emitParticleAt(enemy.x, enemy.y);
+        }
+
+        /**
+         * Handles the game over state: stops gameplay, shows messages, and prepares for restart.
+         */
+        gameOver() {
+            isGameOver = true;
+            this.physics.pause(); // Stop all physics movement and collisions
+
+            // Hide player and clear its drawing
+            player.setActive(false).setVisible(false);
+            playerGraphics.clear();
+
+            // Hide all active enemies and clear their drawings
+            enemies.children.each(function(enemy) {
+                enemy.disableBody(true, true);
+                if (enemy.graphics) enemy.graphics.clear();
+            });
+            // Hide all active projectiles and clear their drawings
+            projectiles.children.each(function(projectile) {
+                projectile.disableBody(true, true);
+                if (projectile.graphics) projectile.graphics.clear();
+            });
+
+            // Display game over messages
+            gameOverText.setVisible(true);
+            restartText.setVisible(true);
+        }
     }
-}
 
-function spawnEntity() {
-    // ADAPT: Spawn zombies off-screen to the right, on the ground level
-    var x = Phaser.Math.Between(850, 950); // X-coordinate far right of the screen
-    var y = 552; // Y-coordinate for ground level (FIXED)
-    
-    var entity = entities.create(x, y, 'zombie');
-    // entity.setCollideWorldBounds(true); // Zombies should not leave game bounds (horizontally) (FIXED - REMOVED)
-    entity.setBounce(0.1); // Small bounce
-    entity.body.setGravityY(300); // Apply gravity so they stay on platforms/ground
-    entity.body.setSize(20, 30); // Adjust hitbox
-    entity.body.setOffset(6, 2); // Adjust hitbox offset
-}
-
-function fireProjectile() {
-    // Projectile spawns slightly in front of the player, in the direction they are facing
-    var projectile = projectiles.create(player.x + (player.flipX ? -15 : 15), player.y, 'bullet');
-    projectile.body.setAllowGravity(false); // Bullets are not affected by gravity
-    projectile.setVelocityX(player.flipX ? -600 : 600); // Fast horizontal shot
-    projectile.setCollideWorldBounds(false); // Allow projectiles to go off-screen
-}
-
-// ═══════════════════════════════════════════════════════════
-// COLLISION HANDLERS
-// ═══════════════════════════════════════════════════════════
-function handlePlayerEntityCollision(player, entity) {
-    // ADAPT: Player takes damage when colliding with a zombie
-    // FIX: Add invulnerability period and visual feedback
-    if (playerIsInvulnerable) {
-        return; // Player is currently invulnerable, ignore damage
-    }
-
-    health -= 10;
-    healthText.setText('Player Health: ' + health);
-    // Change player health text color based on remaining health
-    healthText.setColor(health > 50 ? '#0f0' : (health > 20 ? '#ff0' : '#f00')); 
-    entity.destroy(); // Zombie is destroyed upon contact with the player
-    
-    // Implement invulnerability
-    playerIsInvulnerable = true;
-    player.setTint(0xff0000); // Flash red
-
-    gameScene.time.delayedCall(500, function() { // 0.5 seconds invulnerability
-        playerIsInvulnerable = false;
-        player.clearTint(); // Remove tint
-    }, [], gameScene);
-    
-    if (health <= 0) endGame('Player defeated!'); // Game over if player health reaches zero
-}
-
-function handleProjectileEntityCollision(projectile, entity) {
-    // ADAPT: Projectile destroys a zombie
-    projectile.destroy();
-    entity.destroy();
-    score += 10;
-    scoreText.setText('Score: ' + score);
-    
-    // FIX: Level progression: Only if all zombies for the current wave have been spawned AND defeated
-    if (zombiesCurrentlySpawning === 0 && entities.countActive(true) === 0) {
-        level++;
-        startWave(); // Start a new, more challenging wave
-    }
-}
-
-function handleZombieBaseCollision(base, zombie) {
-    // ADAPT: Zombie damages the base
-    baseHealth -= 5;
-    baseHealthText.setText('Base Health: ' + baseHealth);
-    // Change base health text color based on remaining health
-    baseHealthText.setColor(baseHealth > 50 ? '#00f' : (baseHealth > 20 ? '#ff0' : '#f00')); 
-    zombie.destroy(); // Zombie is destroyed after hitting the base
-    
-    if (baseHealth <= 0) endGame('Base overrun!'); // Game over if base health reaches zero
-}
-
-// ═══════════════════════════════════════════════════════════
-// GAME STATE
-// ═══════════════════════════════════════════════════════════
-function endGame(reason) {
-    if (gameOver) return;
-    gameOver = true;
-    gameScene.physics.pause(); // Pause all physics
-    player.setTint(0xff0000); // Tint player red to indicate defeat
-    
-    // FIX: Stop wave spawning event if game ends
-    if (waveSpawnEvent) {
-        waveSpawnEvent.destroy();
-        waveSpawnEvent = null;
-    }
-
-    // Display game over messages
-    gameScene.add.text(400, 250, 'GAME OVER', {
-        fontSize: '64px', fill: '#fff', fontStyle: 'bold'
-    }).setOrigin(0.5);
-    
-    gameScene.add.text(400, 320, reason, {
-        fontSize: '24px', fill: '#aaa'
-    }).setOrigin(0.5);
-    
-    gameScene.add.text(400, 360, 'Final Score: ' + score, {
-        fontSize: '32px', fill: '#ff0', fontStyle: 'bold'
-    }).setOrigin(0.5);
-    
-    gameScene.add.text(400, 420, 'Click to Restart', {
-        fontSize: '20px', fill: '#888'
-    }).setOrigin(0.5);
-    
-    // Restart game on click
-    gameScene.input.once('pointerdown', function() {
-        gameScene.scene.restart();
-        // Reset all game state variables
-        score = 0; health = 100; baseHealth = 100; level = 1; gameOver = false;
-        totalZombiesForCurrentWave = 0; // FIX: Reset wave variables
-        zombiesCurrentlySpawning = 0;
-        waveSpawnEvent = null;
-        playerIsInvulnerable = false; // FIX: Reset player invulnerability
-    });
-}
-
+    // Initialize the Phaser game
+    const game = new Phaser.Game(config);
+    // Add and start the GameScene immediately
+    game.scene.add('GameScene', GameScene, true);
 </script>
+
 </body>
 </html>

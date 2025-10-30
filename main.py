@@ -1,188 +1,4 @@
-# # main.py
-# import os
-# import uuid
-# import uvicorn
-# from fastapi import FastAPI, HTTPException
-# from fastapi.middleware.cors import CORSMiddleware
-# from pydantic import BaseModel
-# from typing import List, Dict
 
-# from langgraph.types import Command  # ✅ Import Command
-# from agent import game_agent_app, GameAgentState
-
-# # -------------------------------
-# # ✅ FastAPI + CORS Setup
-# # -------------------------------
-# app = FastAPI(title="GameForge AI Backend", version="2.0")
-
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["*"],
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
-
-# # -------------------------------
-# # ✅ Request Models
-# # -------------------------------
-# class StartRequest(BaseModel):
-#     """Model for starting a new generation session"""
-#     prompt: str
-
-# class ResumeRequest(BaseModel):
-#     """Model for resuming after an interrupt"""
-#     session_id: str
-#     answers: List[Dict[str, str]]
-
-# class FeedbackRequest(BaseModel):
-#     """Model for resuming after feedback interrupt"""
-#     session_id: str
-#     feedback: str
-
-# # -------------------------------
-# # ✅ Start New Game Session
-# # -------------------------------
-# @app.post("/api/start")
-# async def start_game(req: StartRequest):
-#     """
-#     Starts a new game generation session.
-#     The agent runs until it hits the first interrupt (questions).
-#     """
-#     try:
-#         # ✅ Generate session ID upfront
-#         session_id = str(uuid.uuid4())
-        
-#         # Initialize new state
-#         state: GameAgentState = {
-#             "session_id": session_id,
-#             "user_raw_input": req.prompt.strip(),
-#         }
-
-#         # ✅ Run the LangGraph agent with proper config
-#         config = {"configurable": {"thread_id": session_id}}
-#         result = await game_agent_app.ainvoke(state, config=config)
-
-#         # ✅ Check for interrupt
-#         if "__interrupt__" in result:
-#             interrupts = result["__interrupt__"]
-#             if interrupts:
-#                 # Get the first interrupt payload
-#                 interrupt_data = interrupts[0].value if hasattr(interrupts[0], 'value') else interrupts[0]
-#                 return {
-#                     "type": "interrupt",
-#                     "session_id": session_id,
-#                     "message": interrupt_data.get("message"),
-#                     "questions": interrupt_data.get("questions", [])
-#                 }
-
-#         # Otherwise, return final output
-#         return {
-#             "type": "success",
-#             "session_id": session_id,
-#             "engine_choice": result.get("engine_choice"),
-#             "reasoning": result.get("engine_reasoning"),
-#             "summary": result.get("final_summary"),
-#             "html": result.get("final_response", {}).get("html", "")
-#         }
-
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# # -------------------------------
-# # ✅ Resume Existing Session
-# # -------------------------------
-# @app.post("/api/resume")
-# async def resume_game(req: ResumeRequest):
-#     """
-#     Resumes an interrupted session.
-#     The user has answered the AI-generated questions,
-#     and we continue the flow from where it paused.
-#     """
-#     try:
-#         # ✅ Resume with Command(resume=answers)
-#         config = {"configurable": {"thread_id": req.session_id}}
-#         result = await game_agent_app.ainvoke(
-#             Command(resume=req.answers),  # ✅ Pass answers as resume value
-#             config=config
-#         )
-
-#         # Check if it interrupts again
-#         if "__interrupt__" in result:
-#             interrupts = result["__interrupt__"]
-#             if interrupts:
-#                 interrupt_data = interrupts[0].value if hasattr(interrupts[0], 'value') else interrupts[0]
-#                 return {
-#                     "type": "interrupt",
-#                     "session_id": req.session_id,
-#                     "message": interrupt_data.get("message"),
-#                     "questions": interrupt_data.get("questions", [])
-#                 }
-
-#         # Otherwise, we're done
-#         return {
-#             "type": "success",
-#             "session_id": req.session_id,
-#             "engine_choice": result.get("engine_choice"),
-#             "reasoning": result.get("engine_reasoning"),
-#             "summary": result.get("final_summary"),
-#             "html": result.get("final_response", {}).get("html", "")
-#         }
-
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# @app.post("/api/feedback")
-# async def resume_after_feedback(req: FeedbackRequest):
-#     """
-#     Continues the session after user gives feedback on generated game.
-#     The feedback string is sent back into the LangGraph workflow,
-#     which then applies the feedback and regenerates code.
-#     """
-#     try:
-#         config = {"configurable": {"thread_id": req.session_id}}
-
-#         # Resume from the feedback interrupt node
-#         result = await game_agent_app.ainvoke(
-#             Command(resume=req.feedback),  # ✅ Pass the feedback text
-#             config=config
-#         )
-
-#         # Handle possible re-interrupt (for another feedback round)
-#         if "__interrupt__" in result:
-#             interrupts = result["__interrupt__"]
-#             if interrupts:
-#                 interrupt_data = interrupts[0].value if hasattr(interrupts[0], 'value') else interrupts[0]
-#                 return {
-#                     "type": "interrupt",
-#                     "session_id": req.session_id,
-#                     "message": interrupt_data.get("message"),
-#                 }
-
-#         # ✅ Otherwise return updated result
-#         return {
-#             "type": "success",
-#             "session_id": req.session_id,
-#             "summary": result.get("final_summary"),
-#             "html": result.get("final_response", {}).get("html", ""),
-#             "feedback_iteration": result.get("feedback_iteration", 0)
-#         }
-
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# # -------------------------------
-# # ✅ Health Check
-# # -------------------------------
-# @app.get("/")
-# async def root():
-#     return {"status": "ok", "message": "GameForge AI backend is live 🚀"}
-
-# # -------------------------------
-# # ✅ Run Locally
-# # -------------------------------
-# if __name__ == "__main__":
-#     uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)), reload=True)
 # main.py
 import os
 import uuid
@@ -219,6 +35,7 @@ app.add_middleware(
 # ✅ In-Memory Store (replace with Prisma/Neon in production)
 # ============================================================
 FINAL_HTML_STORE: Dict[str, str] = {}
+GAME_SESSIONS: Dict[str, GameAgentState] = {}
 
 # ============================================================
 # ✅ Request Models
@@ -255,6 +72,8 @@ async def start_game(req: StartRequest):
 
         config = {"configurable": {"thread_id": session_id}}
         result = await game_agent_app.ainvoke(state, config=config)
+        
+        GAME_SESSIONS[session_id] = result
 
         # Handle interrupt (asking user questions)
         if "__interrupt__" in result:
@@ -312,6 +131,8 @@ async def resume_game(req: ResumeRequest):
         if html:
             FINAL_HTML_STORE[req.session_id] = html
 
+        GAME_SESSIONS[req.session_id] = result
+
         return {
             "type": "success",
             "session_id": req.session_id,
@@ -332,46 +153,166 @@ async def resume_game(req: ResumeRequest):
 async def feedback_endpoint(req: FeedbackRequest):
     """
     Applies user feedback to an already generated game.
-    Does NOT rely on LangGraph resume (since the graph finished).
-    Instead, it loads the last generated HTML, applies changes via
-    apply_feedback_to_code → review_code → fix_game_code → finalize_output.
     """
     sid = req.session_id
-    if sid not in FINAL_HTML_STORE:
-        raise HTTPException(status_code=404, detail="No saved game found for this session ID.")
-
-    # Build new state
-    state: GameAgentState = {
-        "session_id": sid,
-        "final_code": FINAL_HTML_STORE[sid],
-        "generated_code": FINAL_HTML_STORE[sid],
-        "user_feedback": req.feedback,
-        "feedback_iteration": 1,
-        "fix_iteration": 0,
-        "feedback_history": [{"iteration": 1, "feedback": req.feedback}],
-    }
+    
+    # ✅ Enhanced logging - Entry point
+    print("\n" + "="*70)
+    print("🔄 FEEDBACK ENDPOINT CALLED")
+    print("="*70)
+    print(f"📋 Session ID: {sid}")
+    print(f"💬 Feedback: {req.feedback}")
+    print(f"📊 Total sessions in memory: {len(GAME_SESSIONS)}")
+    print(f"🔑 Available session IDs: {list(GAME_SESSIONS.keys())}")
+    
+    if sid not in GAME_SESSIONS:
+        error_msg = f"Session ID '{sid}' not found in GAME_SESSIONS"
+        print(f"\n❌ ERROR: {error_msg}")
+        print(f"Available sessions: {list(GAME_SESSIONS.keys())}")
+        raise HTTPException(
+            status_code=404, 
+            detail={
+                "error": error_msg,
+                "available_sessions": list(GAME_SESSIONS.keys()),
+                "total_sessions": len(GAME_SESSIONS)
+            }
+        )
 
     try:
+        # ✅ Load the complete previous state
+        print("\n📦 Loading previous state...")
+        previous_state = GAME_SESSIONS[sid]
+        print(f"✅ Previous state loaded")
+        print(f"   Keys in state: {list(previous_state.keys())}")
+        print(f"   Engine choice: {previous_state.get('engine_choice', 'NOT_SET')}")
+        print(f"   Has generated_code: {'generated_code' in previous_state}")
+        print(f"   Has final_code: {'final_code' in previous_state}")
+        print(f"   Current feedback iteration: {previous_state.get('feedback_iteration', 0)}")
+        
+        # ✅ Validate required fields
+        code_field = None
+        if "generated_code" in previous_state and previous_state["generated_code"]:
+            code_field = "generated_code"
+        elif "final_code" in previous_state and previous_state["final_code"]:
+            code_field = "final_code"
+            previous_state["generated_code"] = previous_state["final_code"]
+        elif "final_response" in previous_state and isinstance(previous_state["final_response"], dict):
+            if "html" in previous_state["final_response"]:
+                code_field = "final_response.html"
+                previous_state["generated_code"] = previous_state["final_response"]["html"]
+        
+        if not code_field:
+            error_msg = "No game code found in session state"
+            print(f"\n❌ ERROR: {error_msg}")
+            print(f"   Checked fields: generated_code, final_code, final_response.html")
+            print(f"   Available state keys: {list(previous_state.keys())}")
+            raise HTTPException(
+                status_code=400, 
+                detail={
+                    "error": error_msg,
+                    "available_keys": list(previous_state.keys()),
+                    "hint": "Game may not have been fully generated. Try /api/resume first."
+                }
+            )
+        
+        print(f"✅ Game code found in: {code_field}")
+        print(f"   Code length: {len(previous_state['generated_code'])} characters")
+        
+        # ✅ Build updated state
+        print("\n🔧 Building updated state...")
+        state: GameAgentState = {
+            **previous_state,
+            "user_feedback": req.feedback,
+            "feedback_iteration": previous_state.get("feedback_iteration", 0) + 1,
+            "fix_iteration": 0,
+            "feedback_history": previous_state.get("feedback_history", []) + [
+                {"iteration": previous_state.get("feedback_iteration", 0) + 1, "feedback": req.feedback}
+            ],
+        }
+        print(f"✅ State updated")
+        print(f"   New feedback iteration: {state['feedback_iteration']}")
+
         # 1️⃣ Apply feedback
-        state = apply_feedback_to_code(state)
+        print("\n" + "-"*70)
+        print("1️⃣  STEP: Applying feedback to code...")
+        print("-"*70)
+        try:
+            state = apply_feedback_to_code(state)
+            print(f"✅ Feedback applied successfully")
+            print(f"   Updated code length: {len(state.get('generated_code', ''))} characters")
+        except Exception as e:
+            print(f"\n❌ ERROR in apply_feedback_to_code:")
+            print(f"   Error type: {type(e).__name__}")
+            print(f"   Error message: {str(e)}")
+            raise
 
         # 2️⃣ Review new code
-        state = review_code(state)
+        print("\n" + "-"*70)
+        print("2️⃣  STEP: Reviewing updated code...")
+        print("-"*70)
+        try:
+            state = review_code(state)
+            review_status = state.get("review_notes", {}).get("status", "unknown")
+            print(f"✅ Code review completed")
+            print(f"   Review status: {review_status}")
+            if review_status == "fail":
+                issues = state.get("review_notes", {}).get("issues", [])
+                print(f"   ⚠️  Issues found: {len(issues)}")
+                for i, issue in enumerate(issues[:3], 1):
+                    print(f"      {i}. {issue}")
+        except Exception as e:
+            print(f"\n❌ ERROR in review_code:")
+            print(f"   Error type: {type(e).__name__}")
+            print(f"   Error message: {str(e)}")
+            raise
 
-        # 3️⃣ If failed, attempt auto-fix up to 3 times
+        # 3️⃣ Fix loop if needed
         max_fix_rounds = 3
+        fix_count = 0
+        print("\n" + "-"*70)
+        print("3️⃣  STEP: Auto-fix loop (if needed)...")
+        print("-"*70)
+        
         while (
             state.get("review_notes", {}).get("status") == "fail"
             and state.get("fix_iteration", 0) < max_fix_rounds
         ):
-            state = fix_game_code(state)
-            state = review_code(state)
+            fix_count += 1
+            print(f"\n🔧 Fix attempt {fix_count}/{max_fix_rounds}...")
+            try:
+                state = fix_game_code(state)
+                state = review_code(state)
+                new_status = state.get("review_notes", {}).get("status")
+                print(f"   Review status after fix: {new_status}")
+            except Exception as e:
+                print(f"   ❌ ERROR during fix attempt {fix_count}:")
+                print(f"      Error type: {type(e).__name__}")
+                print(f"      Error message: {str(e)}")
+                raise
+        
+        if fix_count == 0:
+            print("✅ No fixes needed - code passed review")
 
-        # 4️⃣ Finalize and persist updated HTML
-        state = finalize_output(state)
+        # 4️⃣ Finalize
+        print("\n" + "-"*70)
+        print("4️⃣  STEP: Finalizing output...")
+        print("-"*70)
+        try:
+            state = finalize_output(state)
+            print(f"✅ Output finalized")
+        except Exception as e:
+            print(f"\n❌ ERROR in finalize_output:")
+            print(f"   Error type: {type(e).__name__}")
+            print(f"   Error message: {str(e)}")
+            raise
+        
+        # ✅ Update stored state
+        GAME_SESSIONS[sid] = state
         new_html = state.get("final_response", {}).get("html", "")
-        if new_html:
-            FINAL_HTML_STORE[sid] = new_html
+        
+        print("\n" + "="*70)
+        print("✅ FEEDBACK PROCESSING COMPLETED SUCCESSFULLY")
+        print("="*70)
 
         return {
             "type": "success",
@@ -382,10 +323,43 @@ async def feedback_endpoint(req: FeedbackRequest):
             "review_notes": state.get("review_notes", {}),
         }
 
+    except HTTPException:
+        raise
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
+        import traceback
+        import sys
+        
+        print("\n" + "="*70)
+        print("❌ FATAL ERROR IN FEEDBACK ENDPOINT")
+        print("="*70)
+        print(f"\n🔴 Error Type: {type(e).__name__}")
+        print(f"🔴 Error Message: {str(e)}")
+        print(f"\n📍 Full Stack Trace:")
+        print("-"*70)
+        traceback.print_exc(file=sys.stdout)
+        print("-"*70)
+        
+        if 'state' in locals():
+            print(f"\n📊 State at failure:")
+            print(f"   Session ID: {state.get('session_id', 'N/A')}")
+            print(f"   Engine choice: {state.get('engine_choice', 'N/A')}")
+            print(f"   State keys: {list(state.keys())}")
+        
+        print(f"\n💬 Feedback: {req.feedback[:300]}")
+        print("="*70)
+        
+        raise HTTPException(
+            status_code=500, 
+            detail={
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "traceback": traceback.format_exc(),
+                "feedback_preview": req.feedback[:200],
+                "session_id": sid,
+                "hint": "Check server console logs for detailed stack trace"
+            }
+        )
 # ============================================================
 # ✅ Health Check Endpoint
 # ============================================================

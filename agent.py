@@ -22,7 +22,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 # Initialize LLM (Gemini)
-llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
+llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro")
 
 
 # -------------------------
@@ -183,7 +183,7 @@ def generate_questions(state: GameAgentState) -> GameAgentState:
     log_timestamp(f"🎯 Generating questions based on intent: {intent.get('summary', 'N/A')[:80]}...")
 
     prompt = f"""
-You are a senior game designer and UX writer. The user idea: {json.dumps(user_text)}
+You are a senior game designer and UX writer building mini games for phaserjs. The user idea: {json.dumps(user_text)}
 
 Use the user's intent metadata (if available) to craft 6 clarifying questions that will get the information needed to author a high-quality 2D playable game.
 
@@ -259,549 +259,424 @@ def validate_inputs(state: GameAgentState) -> GameAgentState:
     state["validated"] = True
     return state
 
-
-def design_game_blueprint(state: GameAgentState) -> GameAgentState:
+def generate_mechanics_blueprint(state: GameAgentState) -> GameAgentState:
     print("\n" + "="*60)
-    print("---NODE: DESIGN GAME BLUEPRINT---")
+    print("---NODE: GENERATE MECHANICS BLUEPRINT (ENHANCED)---")
     print("="*60)
     
     user_text = state.get("user_raw_input", "")
     intent = state.get("intent", {})
     answers = state.get("answers", [])
-    
-    log_timestamp("📐 Creating game design document...")
+    design_struct = state.get("design_doc_structured", {})
+
+    log_timestamp("🧠 Generating detailed mechanics + art blueprint...")
 
     prompt = f"""
-You are a senior game designer. Using the information below, produce a clear, structured design document for a production-quality 2D game.
-Include: objective, win/lose conditions, core mechanics, controls, progression (levels or waves), enemy behavior, scoring, UI elements (health/score), and art/style notes.
+You are a senior **game systems designer and art director** working together.
+Using the following information, generate a **comprehensive pseudocode-style blueprint** for both the mechanics and the presentation of a 2D game.
 
-User idea:
+────────────────────────
+User Idea:
 {user_text}
 
-Intent metadata:
+Intent Metadata:
 {json.dumps(intent, indent=2)}
 
-User answers (list):
-{json.dumps(answers, indent=2)}
+Structured Design Summary:
+{json.dumps(design_struct, indent=2)}
 
-Return as two parts separated by a line '---STRUCTURED-JSON---' where the first part is a short human-readable design summary (1-3 paragraphs) and the second part is a JSON object named "design" with keys:
+User Answers (player preferences):
+{json.dumps(answers, indent=2)}
+────────────────────────
+
+Your job is to imagine the game as if it were in early prototyping — describe all entities, mechanics, and artistic presentation precisely enough for a developer to implement them in Phaser or HTML Canvas.
+
+────────────────────────
+OUTPUT FORMAT (STRICT JSON ONLY)
+────────────────────────
+Return JSON with the following structure:
+
 {{
-  "title": "...",
-  "objective": "...",
-  "win_condition": "...",
-  "lose_condition": "...",
-  "core_mechanics": ["..."],
-  "controls": ["..."],
-  "progression": "...",
-  "enemy_behavior": "...",
-  "ui": {{ "score": true, "health": true }},
-  "art_notes": "...",
+  "entities": [
+    {{
+      "name": "player",
+      "role": "main controllable entity",
+      "behavior": "e.g., moves with WASD, fires projectiles, takes damage on collision",
+      "variables": ["x", "y", "velocity", "health", "score"],
+      "animations": ["idle", "move", "attack", "hit"],
+      "visual_style": {{
+        "shape": "e.g., humanoid, blob, jellyfish, robot",
+        "colors": ["hex1", "hex2"],
+        "effects": ["glow", "trail", "pulsing", "outline"]
+      }},
+      "sound_effects": ["jump", "shoot", "damage"]
+    }},
+    {{
+      "name": "enemy",
+      "role": "hostile or obstacle",
+      "behavior": "e.g., patrols, chases, fires projectiles, explodes",
+      "variables": ["x", "y", "velocity", "hp"],
+      "animations": ["spawn", "attack", "death"],
+      "visual_style": {{
+        "shape": "e.g., octopus, alien, rock monster",
+        "colors": ["#ff3300", "#aa0000"],
+        "effects": ["smoke", "pulse", "glow"]
+      }},
+      "sound_effects": ["attack", "death"]
+    }},
+    {{
+      "name": "projectile",
+      "role": "object fired by player or enemy",
+      "behavior": "travels in straight line, collides, disappears",
+      "visual_style": {{
+        "shape": "orb",
+        "colors": ["#00ffff"],
+        "effects": ["trail", "flash"]
+      }}
+    }}
+  ],
+  "environment": {{
+    "theme": "e.g., neon city, coral reef, alien desert",
+    "lighting": "day|night|neon|underwater|dynamic",
+    "background_elements": ["mountains", "stars", "bubbles", "ruins"],
+    "foreground_effects": ["fog", "particles", "light rays"],
+    "color_palette": ["#hex", "#hex", "#hex"],
+    "music_style": "e.g., ambient synthwave, upbeat chiptune, dark orchestral"
+  }},
+  "core_loop": [
+    "spawn enemies periodically or per wave",
+    "player moves and performs actions",
+    "handle collisions (projectiles vs enemies, player vs enemy)",
+    "update health, score, and level progression",
+    "check win and lose conditions"
+  ],
+  "controls": ["list of control inputs like WASD, SPACE, MOUSE"],
+  "special_mechanics": ["e.g., slow motion, shield, combo meter, tentacle attack"],
+  "ui": {{
+    "elements": ["score", "health", "level", "timer"],
+    "layout": "top-left for score, top-right for health, bottom for level",
+    "style": "pixel font | neon digital | minimal white text"
+  }},
+  "camera_behavior": "fixed | follow player | scrolling | zoom",
+  "win_condition": "explicit condition",
+  "lose_condition": "explicit condition",
   "estimated_complexity": "low|medium|high"
 }}
 
-Respond with the combined text exactly as specified.
+────────────────────────
+Guidelines:
+────────────────────────
+- Combine **mechanical logic + artistic vision**.
+- Be descriptive yet implementable.
+- Avoid generic phrases like “looks good”; define actual shapes, colors, or moods.
+- Match art style to the intent’s vibe (dark, retro, cute, neon, fantasy, etc.).
+- Use consistent terminology and JSON syntax.
+- Include at least one unique or signature mechanic that makes the game memorable.
 """
-    out = llm_invoke_text(prompt)
-    
-    if '---STRUCTURED-JSON---' in out:
-        human_part, json_part = out.split('---STRUCTURED-JSON---', 1)
-        state["design_doc"] = human_part.strip()
-        try:
-            design_json = safe_json_parse(json_part.strip())
-            state["design_doc_structured"] = design_json
-            log_timestamp(f"✅ Design created: {design_json.get('title', 'Untitled')}")
-            log_timestamp(f"📊 Complexity: {design_json.get('estimated_complexity', 'unknown')}")
-        except Exception as e:
-            log_timestamp(f"⚠️  Structured JSON parsing failed: {str(e)}")
-            state["design_doc_structured"] = {"estimated_complexity": "medium", "note": "could not parse structured JSON"}
-    else:
-        log_timestamp("⚠️  No structured separator found, using full text")
-        state["design_doc"] = out
-        state["design_doc_structured"] = {"estimated_complexity": "medium"}
 
+    out = llm_invoke_text(prompt)
+
+    try:
+        blueprint = safe_json_parse(out)
+        log_timestamp(f"✅ Mechanics + Art blueprint parsed successfully with {len(blueprint.get('entities', []))} entities.")
+        log_timestamp(f"🎨 Art theme: {blueprint.get('environment', {}).get('theme', 'unknown')}")
+        log_timestamp(f"📊 Estimated complexity: {blueprint.get('estimated_complexity', 'unknown')}")
+    except Exception as e:
+        log_timestamp(f"⚠️ Blueprint parsing failed: {str(e)}")
+        log_timestamp(f"⚠️ Raw output (first 500 chars): {out[:500]}")
+        blueprint = {
+            "entities": [],
+            "core_loop": [],
+            "controls": [],
+            "environment": {},
+            "ui": {},
+            "special_mechanics": [],
+            "estimated_complexity": "medium",
+            "note": "Failed to parse JSON output"
+        }
+
+    state["mechanics_blueprint"] = blueprint
     return state
 
-
-def engine_decision(state: GameAgentState) -> GameAgentState:
+def complexity_branch(state: GameAgentState):
+    """
+    Branches based on the game's estimated complexity.
+    Routes to pseudocode generation for medium/high complexity,
+    or directly to prompt build for low complexity.
+    """
     print("\n" + "="*60)
-    print("---NODE: ENGINE DECISION (LLM-driven)---")
+    print("---NODE: COMPLEXITY BRANCH---")
     print("="*60)
     
-    design_struct = state.get("design_doc_structured") or state.get("design_doc") or ""
+    # Try to detect complexity from structured blueprint or mechanics
+    design_struct = state.get("design_doc_structured", {})
+    mechanics = state.get("mechanics_blueprint", {})
+    est_complexity = (
+        mechanics.get("estimated_complexity") or 
+        design_struct.get("estimated_complexity") or 
+        "medium"
+    ).lower()
     
-    log_timestamp("🎮 Deciding game engine...")
+    log_timestamp(f"🧠 Detected game complexity: {est_complexity}")
     
+    if est_complexity in ["low", "simple"]:
+        log_timestamp("⚡ Simple game — skipping pseudocode generation.")
+        next_node = "build_code_prompt"
+    else:
+        log_timestamp("🧩 Medium/High complexity — generating pseudocode plan.")
+        next_node = "generate_pseudocode_plan"
+    
+    return next_node
+
+def generate_pseudocode_plan(state: GameAgentState) -> GameAgentState:
+    print("\n" + "="*60)
+    print("---NODE: GENERATE PSEUDOCODE PLAN (BALANCED)---")
+    print("="*60)
+    
+    design_struct = state.get("design_doc_structured", {})
+    mech_blueprint = state.get("mechanics_blueprint", {})
+    user_text = state.get("user_raw_input", "")
+    intent = state.get("intent", {})
+
+    log_timestamp("🧩 Generating human-readable pseudocode plan...")
+
     prompt = f"""
-You are an expert 2D game engine architect. Given the following structured design information, decide whether the implementation
-should use PHASER (Phaser 3) or HTML_CANVAS (vanilla Canvas/DOM). Consider complexity, physics, number of levels, animations, and performance.
+You are a senior 2D phaserJS game developer planning the gameplay logic before implementation.
 
-Return ONLY a JSON object exactly like:
-{{ "engine_choice": "PHASER" | "HTML_CANVAS", "reasoning": "one or two sentence explanation" }}
+Your task is to write a **clear, structured pseudocode plan** — like an annotated script — that explains how the game should work, step by step.  
+Use indentation, comments, and consistent formatting.  
+The pseudocode should feel like real development planning notes, not JSON.
 
-Design info:
+──────────────────────────────
+GAME DESIGN INPUTS
+──────────────────────────────
+User Idea:
+{user_text}
+
+Intent Metadata:
+{json.dumps(intent, indent=2)}
+
+Structured Design:
 {json.dumps(design_struct, indent=2)}
+
+Mechanics Blueprint:
+{json.dumps(mech_blueprint, indent=2)}
+
+──────────────────────────────
+OUTPUT FORMAT
+──────────────────────────────
+Write plain text pseudocode with the following sections (use clear headers):
+
+SETUP:
+- Game window, engine initialization, physics setup
+- Asset placeholders (procedural shapes if mentioned)
+
+ENTITIES:
+- Describe each entity (player, enemies, projectiles)
+- Include attributes and behaviors
+- Mention key variables and interactions
+
+CONTROLS:
+- Describe control mappings and how player movement/actions work
+
+GAME LOOP:
+- Describe the frame update process
+- Movement, collisions, AI, and level updates
+
+COLLISIONS:
+- Define collision outcomes (damage, scoring, destruction)
+
+UI + FEEDBACK:
+- HUD, health, score, level, effects, visual or sound feedback
+
+SPECIAL MECHANICS:
+- Mention unique or creative systems (e.g., time freeze, tentacle shooting, portals)
+
+PROGRESSION:
+- Explain how the difficulty or level changes
+
+WIN / LOSE CONDITIONS:
+- Define victory and defeat clearly
+
+ART + AUDIO NOTES:
+- Mention colors, style, lighting, animations, and ambient music direction
+
+──────────────────────────────
+Guidelines:
+──────────────────────────────
+- Be descriptive, but concise.
+- Use “//” comments liberally to annotate reasoning.
+- Write as if another developer will implement it.
+- Keep indentation consistent.
+- Avoid JSON or natural-language paragraphs.
+- Example:
+    SETUP:
+        // Initialize Phaser game with 800x600 window
+        // Enable Arcade physics, gravity = 0
+    ENTITIES:
+        player:
+            // Moves with WASD, shoots with SPACE
+            // Has 100 HP, 3 lives
+        enemy:
+            // Spawns at random edges, chases player
+            // Explodes on hit
 """
+
     out = llm_invoke_text(prompt)
-    try:
-        decision = safe_json_parse(out)
-        state["engine_choice"] = decision.get("engine_choice", "HTML_CANVAS")
-        state["engine_reasoning"] = decision.get("reasoning", "")
-        log_timestamp(f"✅ Engine selected: {state['engine_choice']}")
-        log_timestamp(f"💡 Reasoning: {state['engine_reasoning']}")
-    except Exception as e:
-        log_timestamp(f"⚠️  Engine decision parsing failed: {str(e)}, using fallback")
-        est = (design_struct.get("estimated_complexity") if isinstance(design_struct, dict) else None) or "medium"
-        if est == "high":
-            state["engine_choice"] = "PHASER"
-            state["engine_reasoning"] = "Estimated complexity high; defaulting to Phaser."
-        else:
-            state["engine_choice"] = "HTML_CANVAS"
-            state["engine_reasoning"] = "Estimated complexity not high; using Canvas for simplicity."
-        log_timestamp(f"✅ Fallback engine: {state['engine_choice']}")
+
+    # Try to clean or verify it’s not blank
+    cleaned = out.strip()
+    if not cleaned or len(cleaned) < 50:
+        log_timestamp("⚠️ LLM returned too short pseudocode, using fallback.")
+        cleaned = (
+            "SETUP:\n"
+            "    // Initialize basic 2D game window and physics\n"
+            "ENTITIES:\n"
+            "    // Player moves with WASD and shoots projectiles\n"
+            "    // Enemies spawn periodically and move toward player\n"
+            "GAME LOOP:\n"
+            "    // Handle input, update entities, detect collisions\n"
+            "    // Display score and health\n"
+        )
+
+    # Store in state
+    state["pseudocode_plan"] = cleaned
+    log_timestamp(f"✅ Pseudocode plan generated ({len(cleaned)} chars)")
+    log_timestamp("📘 Sample preview:")
+    print("\n" + cleaned[:400] + ("\n... (truncated)" if len(cleaned) > 400 else ""))
     
     return state
+
 
 def build_code_prompt(state: GameAgentState) -> GameAgentState:
     print("\n" + "="*60)
-    print("---NODE: BUILD CODE PROMPT---")
+    print("---NODE: BUILD CODE PROMPT (ADAPTIVE PHASER VERSION)---")
     print("="*60)
     
-    engine = state.get("engine_choice", "HTML_CANVAS")
+    # Retrieve context
+    title = state.get("design_doc_structured", {}).get("title", "Untitled Game")
+    genre = state.get("design_doc_structured", {}).get("genre", "arcade")
     design_summary = state.get("design_doc", "")
     design_struct = state.get("design_doc_structured", {})
-    controls = design_struct.get("controls", ["WASD"])
-    genre = design_struct.get("genre", "shooter")
-    
-    log_timestamp(f"📝 Building code generation prompt for {engine}...")
+    mechanics = state.get("mechanics_blueprint", {})
+    pseudocode = state.get("pseudocode_plan", "")
+    complexity = (
+        mechanics.get("estimated_complexity")
+        or design_struct.get("estimated_complexity")
+        or "medium"
+    ).lower()
 
+    # Environment and art details
+    environment = mechanics.get("environment", {})
+    theme = environment.get("theme", "default")
+    lighting = environment.get("lighting", "standard")
+    color_palette = environment.get("color_palette", ["#000000", "#FFFFFF"])
+    art_notes = design_struct.get("art_notes", mechanics.get("art_notes", ""))
+
+    # Controls and style
+    controls = design_struct.get("controls", mechanics.get("controls", ["WASD"]))
+    control_text = ", ".join(controls) if isinstance(controls, list) else controls
+
+    log_timestamp(f"📝 Building Phaser code generation prompt for: {title} ({complexity} complexity)")
+
+    # ======================================================
+    # PROMPT START
+    # ======================================================
     prompt = f"""
-You are an expert game developer. You will adapt a WORKING template to create a bug-free game.
+You are an expert **Phaser 3** game developer.
+Generate a **fully functional**, playable HTML game using Phaser 3 based on the following data.
+
+Your goal:
+- Create a self-contained, bug-free Phaser 3 game.
+- Reflect the mechanics, pseudocode, and art/environment styles provided.
+- The game must load and run directly in the browser with no external assets.
+- Use procedural shapes for all sprites and effects and make sure they look like characters (have hands , eyes etc) and not just (squares , triangle , shapes etc)
 
 ═══════════════════════════════════════════════════════════
-GAME SPECIFICATION
+🎮 GAME CONTEXT
 ═══════════════════════════════════════════════════════════
-
-Title: {design_struct.get('title', 'Game')}
+Title: {title}
 Genre: {genre}
-Engine: {engine}
+Complexity: {complexity}
+Theme: {theme}
+Lighting: {lighting}
+Color Palette: {color_palette}
+Controls: {control_text}
 
-Design Summary:
+═══════════════════════════════════════════════════════════
+📘 DESIGN SUMMARY
+═══════════════════════════════════════════════════════════
 {design_summary}
 
-Full Requirements:
-{json.dumps(design_struct, indent=2)}
+═══════════════════════════════════════════════════════════
+⚙️ MECHANICS BLUEPRINT
+═══════════════════════════════════════════════════════════
+{json.dumps(mechanics, indent=2)}
 
 ═══════════════════════════════════════════════════════════
-WORKING TEMPLATE - COPY THIS STRUCTURE and IMPROVISE ON ONLY VISUALS OF CHARACTERS AND BG , DO NOT ALTER GAME LOGIC 
+📜 IMPLEMENTATION PLAN (PSEUDOCODE)
 ═══════════════════════════════════════════════════════════
+{pseudocode or "// No pseudocode generated (simple game)."}
 
+═══════════════════════════════════════════════════════════
+🎨 ART + ENVIRONMENT NOTES
+═══════════════════════════════════════════════════════════
+{art_notes or "// Use a visual style that matches theme and genre."}
+
+═══════════════════════════════════════════════════════════
+💡 IMPLEMENTATION INSTRUCTIONS
+═══════════════════════════════════════════════════════════
+Follow these rules when generating the code:
+
+1. **Use Phaser 3** only.
+2. No external files, images, or assets — draw entities using Phaser's graphics API.
+3. Implement all entities, collisions, and behaviors mentioned in the pseudocode or blueprint.
+4. Background and lighting should visually match the theme.
+5. Include proper UI (score, health, etc.) in the top corners.
+6. The game must be playable immediately after load.
+7. Use comments generously to explain how the logic implements each mechanic.
+8. Add subtle particle effects, simple animations, and responsive controls.
+9. Include a restart mechanism on game over.
+10. Maintain performance — avoid excessive loops or physics calls.
+
+═══════════════════════════════════════════════════════════
+📄 OUTPUT REQUIREMENT
+═══════════════════════════════════════════════════════════
+Output ONLY the **final working HTML file**, starting with:
 <!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<title>{design_struct.get('title', 'Game')}</title>
-<style>
-body {{ margin: 0; padding: 0; background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; }}
-#game {{ border: 2px solid #333; }}
-</style>
-<script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
-</head>
-<body>
-<div id="game"></div>
-<script>
 
-// ═══════════════════════════════════════════════════════════
-// GLOBAL VARIABLES (Always declare these)
-// ═══════════════════════════════════════════════════════════
-var gameScene;  // Scene reference for callbacks
-var player;     // Main player entity
-var entities;   // Group for enemies/obstacles/collectibles
-var projectiles; // Group for bullets/thrown objects
-
-// Game state
-var score = 0;
-var health = 100;
-var level = 1;
-var gameOver = false;
-
-// UI elements
-var scoreText, healthText, levelText, instructionsText;
-
-// Input
-var keys;  // Keyboard input object
-
-// ═══════════════════════════════════════════════════════════
-// PHASER CONFIGURATION
-// ═══════════════════════════════════════════════════════════
-var config = {{
-    type: Phaser.AUTO,
-    width: 800,
-    height: 600,
-    parent: 'game',
-    physics: {{
-        default: 'arcade',
-        arcade: {{
-            gravity: {{ y: 0 }},  // ADAPT: Set to 300+ for platformers, 0 for top-down
-            debug: false
-        }}
-    }},
-    scene: {{
-        preload: preload,
-        create: create,
-        update: update
-    }}
-}};
-
-var game = new Phaser.Game(config);
-
-// ═══════════════════════════════════════════════════════════
-// PRELOAD: Create Visible Sprites  (I HAVE SHARED AN EXAMPLE , You can be more creative and generate more types as needed , be pretty+professional ) 
-// ═══════════════════════════════════════════════════════════
+❌ Do NOT include Markdown code fences (```)
+❌ Do NOT add explanations before or after
+✅ Include both <style> and <script> sections
 
 ═══════════════════════════════════════════════════════════
-DYNAMIC VISUAL ADAPTATION
+⚙️ HINTS FOR CODE STRUCTURE
 ═══════════════════════════════════════════════════════════
-For each entity type listed in key_entities, dynamically generate a sprite using Phaser graphics:
-- The shape, color, and pattern must reflect the entity's concept.
-- Example:
-  - Alien → glowing green oval with eyes and tentacles and legs and hands.
-  - Lion → orange/yellow shape with a mane (spikes or layered circles) and legs and hands.
-  - Robot → metallic gray box with antenna lights and legs and hands.
-  - Ghost → floating blob with trailing bottom and hands.
-- Background must match setting (space, jungle, ruins, neon city, etc.)
-- No static rectangles or circles — combine multiple shapes and effects.
-- Use procedural drawing: gradients, polygons, arcs, layered fills, and particle-like sparkles.
-- Animate some parts slightly (rotation, pulsing, fading).
-
-function generateSprite(scene, key, type) {{
-  const g = scene.make.graphics({{ x: 0, y: 0, add: false }});
-  
-  if (type === "alien") {{
-    // Alien: glowing green oval with tentacles
-    g.fillStyle(0x00ff88);
-    g.fillEllipse(16, 16, 14, 20);
-    for (let i = 0; i < 5; i++) {{
-      const x = 16 + Math.cos(i * 1.3) * 12;
-      g.fillStyle(0x00dd77);
-      g.fillRect(x - 2, 28, 4, 6);
-    }}
-    g.lineStyle(2, 0xffffff, 0.6);
-    g.strokeEllipse(16, 16, 14, 20);
-  }}
-  else if (type === "lion") {{
-    // Lion: mane of spikes + face center
-    for (let i = 0; i < 16; i++) {{
-      const angle = i * (Math.PI / 8);
-      g.fillStyle(0xffaa00);
-      g.fillTriangle(16, 16,
-                     16 + Math.cos(angle) * 20,
-                     16 + Math.sin(angle) * 20,
-                     16 + Math.cos(angle + 0.3) * 10,
-                     16 + Math.sin(angle + 0.3) * 10);
-    }}
-    g.fillStyle(0xffcc33);
-    g.fillCircle(16, 16, 10);
-  }}
-  else if (type === "robot") {{
-    // Robot: metallic body with lights
-    g.fillStyle(0x888888);
-    g.fillRect(4, 4, 24, 24);
-    g.fillStyle(0x00ffff);
-    g.fillRect(10, 10, 4, 4);
-    g.fillRect(18, 10, 4, 4);
-    g.fillStyle(0xff0000);
-    g.fillRect(12, 20, 8, 3);
-  }}
-  else if (type === "ghost") {{
-    g.fillStyle(0x99ffff);
-    g.fillEllipse(16, 16, 14, 18);
-    g.fillStyle(0x77ddff);
-    g.fillRect(8, 24, 16, 4);
-  }}
-  else {{
-    // Default (arcade orb)
-    g.fillStyle(0xff00ff);
-    g.fillCircle(16, 16, 14);
-    g.lineStyle(3, 0xffffff, 0.7);
-    g.strokeCircle(16, 16, 14);
-  }}
-
-  g.generateTexture(key, 32, 32);
-  g.destroy();
-}}
-
-
-// ═══════════════════════════════════════════════════════════
-// CREATE: Game Initialization
-// ═══════════════════════════════════════════════════════════
-function create() {{
-    gameScene = this;  // DO NOT CHANGE: Store scene reference
-    
-    // Player setup
-    player = this.physics.add.sprite(400, 300, 'player');
-    player.setCollideWorldBounds(true);
-    
-    // Groups
-    entities = this.physics.add.group();
-    projectiles = this.physics.add.group();
-    
-    // ADAPT INPUT: Match these to your control specification
-    keys = this.input.keyboard.addKeys({{
-        W: 'W',
-        A: 'A',
-        S: 'S',
-        D: 'D',
-        SPACE: 'SPACE',
-        UP: 'UP',
-        DOWN: 'DOWN',
-        LEFT: 'LEFT',
-        RIGHT: 'RIGHT'
-    }});
-    
-    // Mouse controls (if needed)
-    this.input.on('pointerdown', handlePointerDown);
-    
-    // Collisions
-    this.physics.add.overlap(player, entities, handlePlayerEntityCollision, null, this);
-    this.physics.add.overlap(projectiles, entities, handleProjectileEntityCollision, null, this);
-    
-    // UI
-    scoreText = this.add.text(16, 16, 'Score: 0', {{ fontSize: '24px', fill: '#fff' }});
-    healthText = this.add.text(16, 48, 'Health: 100', {{ fontSize: '20px', fill: '#0f0' }});
-    levelText = this.add.text(16, 76, 'Level: 1', {{ fontSize: '20px', fill: '#ff0' }});
-    
-    // ADAPT: Match instruction text to actual controls
-    instructionsText = this.add.text(550, 16, 
-        'WASD: Move\\nMouse: Shoot', 
-        {{ fontSize: '16px', fill: '#aaa', align: 'right' }}
-    );
-    
-    // ADAPT: Spawn initial entities appropriate for your game
-    for (let i = 0; i < 5; i++) {{
-        spawnEntity();
-    }}
-    
-    // ADAPT: Entity spawning timer
-    this.time.addEvent({{
-        delay: 2000,
-        callback: spawnEntity,
-        loop: true
-    }});
-}}
-
-// ═══════════════════════════════════════════════════════════
-// UPDATE: Main Game Loop
-// ═══════════════════════════════════════════════════════════
-function update(time, delta) {{
-    if (gameOver) return;
-    
-    // ADAPT MOVEMENT: Choose based on genre
-    
-    // Option 1: Top-down (shooters, top-down games)
-    player.setVelocity(0);
-    if (keys.W.isDown || keys.UP.isDown) player.setVelocityY(-200);
-    if (keys.S.isDown || keys.DOWN.isDown) player.setVelocityY(200);
-    if (keys.A.isDown || keys.LEFT.isDown) player.setVelocityX(-200);
-    if (keys.D.isDown || keys.RIGHT.isDown) player.setVelocityX(200);
-    
-    // Option 2: Platformer (uncomment if platformer)
-    // player.setVelocityX(0);
-    // if (keys.A.isDown || keys.LEFT.isDown) player.setVelocityX(-160);
-    // if (keys.D.isDown || keys.RIGHT.isDown) player.setVelocityX(160);
-    // if (keys.SPACE.isDown && player.body.touching.down) player.setVelocityY(-330);
-    
-    // Option 3: Auto-runner (uncomment if runner)
-    // player.setVelocityX(200);
-    // if (keys.SPACE.isDown && player.body.touching.down) player.setVelocityY(-400);
-    
-    // ADAPT AI: Entity behavior every frame
-    entities.getChildren().forEach(function(entity) {{
-        // Chase AI (for enemies)
-        gameScene.physics.moveToObject(entity, player, 60);
-        
-        // OR Patrol AI (uncomment for platformer):
-        // if (!entity.getData('dir')) entity.setData('dir', 1);
-        // entity.setVelocityX(50 * entity.getData('dir'));
-        // if (entity.x < 50 || entity.x > 750) entity.setData('dir', -entity.getData('dir'));
-    }});
-    
-    // ADAPT ACTION: Shooting or other action
-    if (keys.SPACE.isDown && time > (player.lastFired || 0) + 300) {{
-        fireProjectile();
-        player.lastFired = time;
-    }}
-    
-    // Cleanup off-screen projectiles
-    projectiles.getChildren().forEach(function(proj) {{
-        if (proj.x < -50 || proj.x > 850 || proj.y < -50 || proj.y > 650) proj.destroy();
-    }});
-}}
-
-// ═══════════════════════════════════════════════════════════
-// INPUT HANDLERS
-// ═══════════════════════════════════════════════════════════
-function handlePointerDown(pointer) {{
-    if (gameOver) return;
-    fireProjectile(pointer.x, pointer.y);
-}}
-
-// ═══════════════════════════════════════════════════════════
-// GAME MECHANICS
-// ═══════════════════════════════════════════════════════════
-function spawnEntity() {{
-    // ADAPT: Spawn position based on game type
-    var x = Phaser.Math.Between(50, 750);
-    var y = Phaser.Math.Between(50, 150);
-    
-    var entity = entities.create(x, y, 'entity');
-}}
-
-function fireProjectile(targetX, targetY) {{
-    var projectile = projectiles.create(player.x, player.y, 'projectile');
-    
-    if (targetX !== undefined) {{
-        // Mouse aiming
-        var angle = Phaser.Math.Angle.Between(player.x, player.y, targetX, targetY);
-        gameScene.physics.velocityFromRotation(angle, 400, projectile.body.velocity);
-    }} else {{
-        // Fixed direction
-        projectile.setVelocityY(-400);
-    }}
-}}
-
-// ═══════════════════════════════════════════════════════════
-// COLLISION HANDLERS
-// ═══════════════════════════════════════════════════════════
-function handlePlayerEntityCollision(player, entity) {{
-    // ADAPT: Define what happens when player touches entity
-    health -= 10;
-    healthText.setText('Health: ' + health);
-    healthText.setColor(health > 50 ? '#0f0' : '#f00');
-    entity.destroy();
-    
-    if (health <= 0) endGame('Health depleted!');
-}}
-
-function handleProjectileEntityCollision(projectile, entity) {{
-    projectile.destroy();
-    entity.destroy();
-    score += 10;
-    scoreText.setText('Score: ' + score);
-    
-    // Level progression
-    if (entities.countActive(true) === 0) {{
-        level++;
-        levelText.setText('Level: ' + level);
-        for (let i = 0; i < level * 3; i++) spawnEntity();
-    }}
-}}
-
-// ═══════════════════════════════════════════════════════════
-// GAME STATE
-// ═══════════════════════════════════════════════════════════
-function endGame(reason) {{
-    if (gameOver) return;
-    gameOver = true;
-    gameScene.physics.pause();
-    player.setTint(0xff0000);
-    
-    gameScene.add.text(400, 250, 'GAME OVER', {{
-        fontSize: '64px', fill: '#fff'
-    }}).setOrigin(0.5);
-    
-    gameScene.add.text(400, 320, reason, {{
-        fontSize: '24px', fill: '#aaa'
-    }}).setOrigin(0.5);
-    
-    gameScene.add.text(400, 360, 'Final Score: ' + score, {{
-        fontSize: '32px', fill: '#ff0'
-    }}).setOrigin(0.5);
-    
-    gameScene.add.text(400, 420, 'Click to Restart', {{
-        fontSize: '20px', fill: '#888'
-    }}).setOrigin(0.5);
-    
-    gameScene.input.once('pointerdown', function() {{
-        gameScene.scene.restart();
-        score = 0; health = 100; level = 1; gameOver = false;
-    }});
-}}
-
-</script>
-</body>
-</html>
+- Use a config object and define a Phaser.Scene with preload(), create(), and update().
+- Declare player, enemies, projectiles, and groups globally.
+- Implement movement, firing, and collision systems.
+- Add text UI for score, health, and level.
+- Implement gameOver() and restart logic.
 
 ═══════════════════════════════════════════════════════════
-ADAPTATION INSTRUCTIONS FOR YOUR GAME
+🚀 READY TO GENERATE
 ═══════════════════════════════════════════════════════════
-
-Genre: {genre}
-Required Controls: {', '.join(controls) if isinstance(controls, list) else controls}
-
-ADAPT THESE SECTIONS (marked with "ADAPT:" comments):
-
-1. GRAVITY SETTING:
-   - Top-down shooter/puzzle: gravity.y = 0
-   - Platformer/runner: gravity.y = 300
-   - Your game: Choose based on genre
-
-2. MOVEMENT PATTERN:
-   - Use Option 1 (top-down) for: shooter, puzzle, top-down
-   - Use Option 2 (platformer) for: platformer, side-scroller
-   - Use Option 3 (auto-runner) for: endless runner, auto-scroller
-
-3. ENTITY AI:
-   - Use chase AI for: enemies in shooters
-   - Use patrol AI for: enemies in platformers
-   - Use falling/static for: obstacles in runners/puzzles
-
-4. INSTRUCTION TEXT:
-   - MUST match actual controls in code
-   - If using WASD, text must say "WASD: Move"
-   - If using arrow keys only, text must say "Arrow Keys: Move"
-
-5. SPAWN LOGIC:
-   - Adjust spawn positions for your game type
-   - Adjust spawn rate based on difficulty
-
-6. COLLISION BEHAVIOR:
-   - Define what happens when player touches entities
-   - Define what happens when projectiles hit entities
-   - Match game rules from design document
-
-═══════════════════════════════════════════════════════════
-CRITICAL RULES - DO NOT BREAK THESE
-═══════════════════════════════════════════════════════════
-
-✅ KEEP UNCHANGED:
-- gameScene = this pattern
-- graphics.generateTexture() sprite creation
-- keys defined ONCE in create()
-- physics.velocityFromRotation() usage
-- Collision callback structure with proper context
-
-❌ NEVER DO:
-- Use this.load.image() with base64 or URLs
-- Define keys inside update() function
-- Use 'this' in callbacks without storing gameScene
-- Call moveToObject() only once at spawn
-- Display UI text that doesn't match controls
-- Use player.rotation without setting it
-
-═══════════════════════════════════════════════════════════
-FINAL OUTPUT
-═══════════════════════════════════════════════════════════
-
-Return ONLY the complete HTML code above with adaptations made.
-Start with <!DOCTYPE html>
-No markdown fences. No explanations. Just the working HTML.
+Generate the complete Phaser 3 HTML code below.
 """
-    
+
+    # ======================================================
+    # STORE IN STATE
+    # ======================================================
     state["game_prompt"] = prompt
-    
-    log_timestamp(f"✅ Enhanced template prompt built ({len(prompt)} chars)")
+
+    log_timestamp(f"✅ Code generation prompt built successfully ({len(prompt)} chars)")
+    if complexity in ["low", "simple"]:
+        log_timestamp("⚡ Note: Direct generation path (no pseudocode used).")
+    else:
+        log_timestamp("🧩 Note: Pseudocode-assisted path for complex game.")
     
     return state
+
 
 
 
@@ -833,81 +708,92 @@ def generate_game_code(state: GameAgentState) -> GameAgentState:
     log_timestamp(f"📄 Contains <script>: {('<script' in html_candidate.lower())}")
     print(f"=========html_candidate is : {html_candidate}=========")
     return state
-
 def review_code(state: GameAgentState) -> GameAgentState:
     print("\n" + "="*60)
-    print("---NODE: REVIEW GAME CODE---")
+    print("---NODE: REVIEW GAME CODE (ENHANCED INTENT-AWARE)---")
     print("="*60)
     
     code = state.get("generated_code", "")
-    engine = state.get("engine_choice", "HTML_CANVAS")
+    engine = state.get("engine_choice", "PHASER")
     fix_iteration = state.get("fix_iteration", 0)
+    intent = state.get("intent", {})
+    mechanics = state.get("mechanics_blueprint", {})
+    pseudocode = state.get("pseudocode_plan", "")
     
-    log_timestamp(f"🔍 Starting code review (iteration #{fix_iteration})...")
+    log_timestamp(f"🔍 Starting enhanced review (iteration #{fix_iteration})...")
     log_timestamp(f"📊 Code stats: {len(code)} chars, {code.count('function')} functions")
+
+    # Quick structure summary
+    log_timestamp("🏗️ Structural analysis:")
+    log_timestamp(f"   - Has <!DOCTYPE>: {code.strip().startswith('<!DOCTYPE')}")
+    log_timestamp(f"   - Has <html>: {('<html' in code.lower())}")
+    log_timestamp(f"   - Has <canvas>: {('<canvas' in code.lower())}")
+    log_timestamp(f"   - Has <script>: {('<script' in code.lower())}")
+    log_timestamp(f"   - Scene lifecycle: {'create(' in code or 'update(' in code}")
+    log_timestamp(f"   - Particle references: {'particles' in code.lower()}")
     
-    # ✅ Log code preview
-    print("\n" + "-"*60)
-    print("📄 CODE BEING REVIEWED (first 1500 chars):")
-    print("-"*60)
-    print(code[:1500])
-    if len(code) > 1500:
-        print(f"\n... [{len(code) - 1500} more chars] ...")
-    print("-"*60 + "\n")
-    
-    # ✅ Log code structure
-    log_timestamp("🏗️  Code structure analysis:")
-    log_timestamp(f"   - Contains <!DOCTYPE>: {code.strip().startswith('<!DOCTYPE')}")
-    log_timestamp(f"   - Contains <html>: {('<html' in code.lower())}")
-    log_timestamp(f"   - Contains <canvas>: {('nvas' in code.lower())}")
-    log_timestamp(f"   - Containsins <script>: {('<script' in code.lower())}")
-    log_timestamp(f"   - Script tags count: {code.lower().count('<script')}")
-    log_timestamp(f"   - Function definitions: {code.count('function ')}")
-    log_timestamp(f"   - Event listeners: {code.count('addEventListener')}")
-    log_timestamp(f"   - Game loop patterns: {code.count('requestAnimationFrame') + code.count('setInterval')}")
-    
-    # Generic principle-based review prompt
+    # Construct enhanced review prompt
     prompt = f"""
-You are a game QA tester reviewing a {engine} browser game for playability.
+You are reviewing this HTML Phaser 3 game.
+make sure this game is playable and correct phaser API are used
 
-Review the code using these PRINCIPLES:
+──────────────────────────────
+USER INTENT
+──────────────────────────────
+{json.dumps(intent, indent=2)}
 
-1. CONSISTENCY PRINCIPLE
-   Does the user interface match the implementation?
-2. COMPLETENESS PRINCIPLE
-   Are core mechanics fully implemented?
-3. VISIBILITY PRINCIPLE
-   Can the player actually see and interact with the game?
-4. FUNCTIONAL PRINCIPLE
-   Does the core gameplay loop work?
+──────────────────────────────
+MECHANICS BLUEPRINT (SUMMARY)
+──────────────────────────────
+{json.dumps(mechanics, indent=2)}
 
-Review for PLAYABILITY, not code quality. Ask yourself:
-"If I loaded this in a browser, could I play and understand what's happening?"
+──────────────────────────────
+GAME CODE (first 8000 chars)
+──────────────────────────────
+{code}
 
-Mark as FAIL if:
-- Core mechanic doesn't work as intended
-- UI text contradicts actual controls
-- Progression/state variables display but never change
-- Game provides no feedback on critical events
-- Sprites invisible or game entities don't spawn
+──────────────────────────────
+REVIEW CHECKLIST
+──────────────────────────────
 
-what i have gave you are just examples of how to review , think and analyze the code for more potentiol errors , it does not needs to be perfect but atleast should not crash.
 
-Respond with JSON only (no markdown):
+2. **Engine Sanity**
+   eg:-
+   - Any invalid Phaser API calls? (e.g., createCanvas().draw())
+   - Missing generateTexture() before sprite use?
+   - Proper use of preload(), create(), and update()?
+
+
+3. **Visual Sanity**
+   eg:-
+   - Would something visible appear when loaded? (background, entities, text)
+   - Are key sprites drawn or filled with color?
+
+4. **Core Mechanics**
+   eg:-
+   - Is the player controllable (e.g., WASD or arrow keys)?
+   - Is there a visible feedback loop (score, health)?
+   - Do collisions or interactions occur?
+
+5. **Functional Stability**
+   eg:-
+   - Any logic that could crash or hang (undefined vars, missing textures)?
+   - GameOver / Restart systems functioning?
+
+──────────────────────────────
+RESPONSE FORMAT (STRICT JSON)
+──────────────────────────────
+Return a JSON object:
 {{
   "status": "pass" | "fail",
-  "issues": ["concise issue description with what's wrong and why it breaks gameplay"],
-  "suggestions": "constructive feedback"
+  "issues": ["list of gameplay, visual, or semantic issues"],
+  "suggestions": "one concise paragraph with fixes or improvements"
 }}
-
-Code to review (first 8000 chars):
-{code}
 """
-    
-    log_timestamp("⏳ Sending code to reviewer LLM...")
+
+    log_timestamp("🧠 Running multi-level review (intent + visual + engine)...")
     out = llm_invoke_text(prompt)
-    
-    # ✅ Log raw review response
+
     print("\n" + "-"*60)
     print("📋 RAW REVIEW RESPONSE:")
     print("-"*60)
@@ -915,35 +801,33 @@ Code to review (first 8000 chars):
     if len(out) > 800:
         print(f"\n... [{len(out) - 800} more chars] ...")
     print("-"*60 + "\n")
-    
+
     try:
         review = safe_json_parse(out)
         status = review.get("status", "fail")
         issues = review.get("issues", [])
         
         log_timestamp(f"📋 Review result: {status.upper()}")
-        
         if status == "fail":
-            log_timestamp(f"❌ Issues found ({len(issues)}):")
             for i, issue in enumerate(issues, 1):
-                log_timestamp(f"   {i}. {issue}")
+                log_timestamp(f"   ❌ {i}. {issue}")
         else:
-            log_timestamp("✅ Code passed review!")
+            log_timestamp("✅ Code passed all checks (intent + engine + visual)")
         
         if review.get("suggestions"):
             log_timestamp(f"💡 Suggestions: {review['suggestions'][:200]}")
-            
+
     except Exception as e:
         log_timestamp(f"⚠️  Review parsing failed: {str(e)}")
-        log_timestamp("⚠️  Raw response preview: " + out[:300])
         review = {
             "status": "fail",
-            "issues": ["Could not parse reviewer output.", "Review response was malformed."],
-            "suggestions": out[:1000]
+            "issues": ["Could not parse reviewer output.", "Review response malformed."],
+            "suggestions": out[:800]
         }
-    
+
     state["review_notes"] = review
     return state
+
 
 
 def fix_game_code(state: GameAgentState) -> GameAgentState:
@@ -969,7 +853,7 @@ def fix_game_code(state: GameAgentState) -> GameAgentState:
     issues = review.get("issues", [])
     suggestions = review.get("suggestions", "")
     code = state.get("generated_code", "")
-    engine = state.get("engine_choice", "HTML_CANVAS")
+    engine = state.get("engine_choice", "PHASER")
     
     log_timestamp(f"🔨 Attempting to fix {len(issues)} issue(s)...")
     log_timestamp(f"📝 Original code: {len(code)} chars")
@@ -1130,7 +1014,6 @@ def collect_user_feedback(state: GameAgentState) -> GameAgentState:
     
     log_timestamp(f"✅ Received feedback iteration #{state['feedback_iteration']}")
     return state
-
 def apply_feedback_to_code(state: GameAgentState) -> GameAgentState:
     print("\n" + "="*60)
     print("---NODE: APPLY FEEDBACK TO CODE---")
@@ -1143,7 +1026,7 @@ def apply_feedback_to_code(state: GameAgentState) -> GameAgentState:
         log_timestamp("⚠️  No feedback provided, skipping...")
         return state
     
-    log_timestamp(f"🛠️ Applying user feedback: {feedback[:120]}...")
+    log_timestamp(f"🛠️  Applying user feedback: {feedback[:120]}...")
     
     prompt = f"""
 You are an expert game developer modifying an existing Phaser/HTML game.
@@ -1161,24 +1044,43 @@ CURRENT GAME CODE:
 {code}
 """
     
+    log_timestamp("⏳ Calling Gemini API...")
     out = llm_invoke_text(prompt)
-    
-    fixed = re.sub(r"^```(?:html)?\s*", "", out.strip())
-    fixed = re.sub(r"\s*```$", "", fixed)
-    if fixed.strip() == code.strip():
-        log_timestamp("⚠️ No visible change detected. Reinforcing feedback...")
-        stronger_prompt = f"""
-    Forcefully apply the feedback below and ensure visible or functional difference.
-    Feedback: {feedback}
-    Code: {code}
-    """
-    out = llm_invoke_text(stronger_prompt)
-    fixed = re.sub(r"^```(?:html)?\s*", "", out.strip())
-    fixed = re.sub(r"\s*```$", "", fixed)
+    log_timestamp("✅ Gemini API responded")
 
+    # Extract HTML from response
+    fixed = re.sub(r"^```(?:html)?\s*", "", out)  # remove leading ``` or ```html
+    fixed = re.sub(r"\s*```$", "", fixed)         # remove trailing ```
+    # ✅ Check if change was actually applied
+    if fixed.strip() == code.strip():
+        log_timestamp("⚠️  No visible change detected. Reinforcing feedback...")
+        
+        # ✅ FIX: All code using stronger_prompt must be INSIDE the if block
+        stronger_prompt = f"""
+Forcefully apply the feedback below and ensure visible or functional difference.
+
+USER FEEDBACK (MANDATORY TO IMPLEMENT):
+{feedback}
+
+CURRENT CODE:
+{code}
+
+Return ONLY the modified HTML. No markdown. Start with <!DOCTYPE html>
+"""
+        log_timestamp("⏳ Calling Gemini API with stronger prompt...")
+        out = llm_invoke_text(prompt)
+        log_timestamp("✅ Gemini API responded")
+
+        # Extract HTML from response
+        fixed = re.sub(r"^```(?:html)?\s*", "", out)  # remove leading ``` or ```html
+        fixed = re.sub(r"\s*```$", "", fixed)         # remove trailing ```
+    
+    # Update state with fixed code
     state["final_code"] = fixed
+    state["generated_code"] = fixed  # ✅ Also update for consistency
+    
     log_timestamp(f"✅ Feedback applied, new code length: {len(fixed)} chars")
-    print(f"xxxxxx==========xxxxxx {fixed} xxxxxx==========xxxxxx")
+    log_timestamp(f"📊 Code change: {len(fixed) - len(code):+d} chars")
     
     return state
 
@@ -1220,8 +1122,7 @@ workflow.add_node("collect_user_idea", collect_user_idea)
 workflow.add_node("generate_questions", generate_questions)
 workflow.add_node("collect_user_answers", collect_user_answers)
 workflow.add_node("validate_inputs", validate_inputs)
-workflow.add_node("design_game_blueprint", design_game_blueprint)
-workflow.add_node("engine_decision", engine_decision)
+workflow.add_node("generate_mechanics_blueprint", generate_mechanics_blueprint)
 workflow.add_node("build_code_prompt", build_code_prompt)
 workflow.add_node("generate_game_code", generate_game_code)
 workflow.add_node("review_code", review_code)
@@ -1230,6 +1131,8 @@ workflow.add_node("finalize_output", finalize_output)
 workflow.add_node("collect_user_feedback", collect_user_feedback)
 workflow.add_node("apply_feedback_to_code", apply_feedback_to_code)
 workflow.add_node("verify_feedback_applied", verify_feedback_applied)
+workflow.add_node("complexity_branch", complexity_branch)
+workflow.add_node("generate_pseudocode_plan", generate_pseudocode_plan)
 
 # Entry point
 workflow.set_entry_point("intent_analysis")
@@ -1239,16 +1142,17 @@ workflow.add_edge("intent_analysis", "collect_user_idea")
 workflow.add_edge("collect_user_idea", "generate_questions")
 workflow.add_edge("generate_questions", "collect_user_answers")
 workflow.add_edge("collect_user_answers", "validate_inputs")
-workflow.add_edge("validate_inputs", "design_game_blueprint")
-workflow.add_edge("design_game_blueprint", "engine_decision")
-workflow.add_edge("engine_decision", "build_code_prompt")
+workflow.add_edge("validate_inputs", "generate_mechanics_blueprint")
+workflow.add_conditional_edges("generate_mechanics_blueprint", complexity_branch)
+workflow.add_edge("generate_pseudocode_plan", "build_code_prompt")
 workflow.add_edge("build_code_prompt", "generate_game_code")
 workflow.add_edge("generate_game_code", "review_code")
 workflow.add_edge("collect_user_feedback", "apply_feedback_to_code")
 workflow.add_edge("apply_feedback_to_code", "verify_feedback_applied")
 workflow.add_edge("verify_feedback_applied", "review_code")
 
-# workflow.add_edge("apply_feedback_to_code", "review_code")
+# Conditional branching based on complexity
+
 
 # conditional: if review fail -> fix_game_code else finalize_output
 def review_branch(state: GameAgentState):
@@ -1267,7 +1171,3 @@ workflow.add_edge("finalize_output", END)
 # compile
 game_agent_app = workflow.compile(checkpointer=memory)
 
-if __name__ == "__main__":
-    print("="*60)
-    print("GameForge LangGraph agent compiled as `game_agent_app`.")
-    print("="*60)
