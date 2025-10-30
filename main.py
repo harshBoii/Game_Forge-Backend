@@ -367,14 +367,3 @@ async def feedback_endpoint(req: FeedbackRequest):
 async def root():
     return {"status": "ok", "message": "GameForge AI backend is running"}
 
-
-# ============================================================
-# ✅ Local Run
-# ============================================================
-if __name__ == "__main__":
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=int(os.getenv("PORT", 8000)),
-        reload=True,
-    )
