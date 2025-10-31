@@ -1,0 +1,83 @@
+pseudocode prompt = f"""
+You are a senior 2D phaserJS game developer planning the gameplay logic before implementation.
+
+Your task is to write a **clear, structured pseudocode plan** — like an annotated script — that explains how the game should work, step by step.  
+Use indentation, comments, and consistent formatting.  
+The pseudocode should feel like real development planning notes, not JSON.
+
+──────────────────────────────
+GAME DESIGN INPUTS
+──────────────────────────────
+User Idea:
+{user_text}
+
+Intent Metadata:
+{json.dumps(intent, indent=2)}
+
+Structured Design:
+{json.dumps(design_struct, indent=2)}
+
+Mechanics Blueprint:
+{json.dumps(mech_blueprint, indent=2)}
+
+──────────────────────────────
+OUTPUT FORMAT
+──────────────────────────────
+Write plain text pseudocode with the following sections (use clear headers):
+
+SETUP:
+- Game window, engine initialization, physics setup
+- Asset placeholders (procedural shapes if mentioned)
+
+ENTITIES:
+- Describe each entity (player, enemies, projectiles)
+- Include attributes and behaviors
+- Mention key variables and interactions
+
+CONTROLS:
+- Describe control mappings and how player movement/actions work on top left corner
+
+GAME LOOP:
+- Describe the frame update process
+- Movement, collisions, AI, and level updates
+
+COLLISIONS:
+- Define collision outcomes (damage, scoring, destruction)
+
+UI + FEEDBACK:
+- HUD, health, score, level, effects, visual or sound feedback
+
+SPECIAL MECHANICS:
+- Mention unique or creative systems (e.g., time freeze, tentacle shooting, portals)
+
+PROGRESSION:
+- Explain how the difficulty or level changes
+
+WIN / LOSE CONDITIONS:
+- Define victory and defeat clearly
+
+ART + AUDIO NOTES:
+- Mention colors, style, lighting, animations, and ambient music direction
+
+──────────────────────────────
+Guidelines:
+──────────────────────────────
+- Be descriptive, but concise.
+- Use “//” comments liberally to annotate reasoning.
+- Write as if another developer will implement it.
+- Keep indentation consistent.
+- Avoid JSON or natural-language paragraphs.
+- Example:
+    SETUP:
+        // Initialize Phaser game with 800x600 window
+        // Enable Arcade physics, gravity = 0
+    ENTITIES:
+        player:
+            // Moves with WASD, shoots with SPACE
+            // Has 100 HP, 3 lives
+        enemy:
+            // Spawns at random edges, chases player
+            // Explodes on hit
+"""
+
+prompt_builder=

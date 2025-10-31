@@ -185,7 +185,7 @@ def generate_questions(state: GameAgentState) -> GameAgentState:
     prompt = f"""
 You are a senior game designer and UX writer building mini games for phaserjs. The user idea: {json.dumps(user_text)}
 
-Use the user's intent metadata (if available) to craft 6 clarifying questions that will get the information needed to author a high-quality 2D playable game.
+Use the user's intent metadata (if available) to craft 6 clarifying questions that will get the information needed to author a aimple 2D playable game.
 
 For each question provide 3-5 multiple-choice options and mark whether the question is critical ("required": true/false).
 
@@ -267,9 +267,17 @@ def generate_mechanics_blueprint(state: GameAgentState) -> GameAgentState:
     user_text = state.get("user_raw_input", "")
     intent = state.get("intent", {})
     answers = state.get("answers", [])
+    questions = state.get("questions", [])
     design_struct = state.get("design_doc_structured", {})
 
+    qa_pairs = []
+    for i, ans in enumerate(answers):
+        q_text = questions[i]["question"] if i < len(questions) else "Unknown question"
+        qa_pairs.append(f"{i+1}. {q_text} → {ans.get('answer', '')}")
+    qa_combined = "\n".join(qa_pairs)
+
     log_timestamp("🧠 Generating detailed mechanics + art blueprint...")
+    print(qa_combined)
 
     prompt = f"""
 You are a senior **game systems designer and art director** working together.
@@ -285,8 +293,8 @@ Intent Metadata:
 Structured Design Summary:
 {json.dumps(design_struct, indent=2)}
 
-User Answers (player preferences):
-{json.dumps(answers, indent=2)}
+User's Demand:
+{json.dumps(qa_combined, indent=2)}
 ────────────────────────
 
 Your job is to imagine the game as if it were in early prototyping — describe all entities, mechanics, and artistic presentation precisely enough for a developer to implement them in Phaser or HTML Canvas.
@@ -450,14 +458,6 @@ The pseudocode should feel like real development planning notes, not JSON.
 ──────────────────────────────
 GAME DESIGN INPUTS
 ──────────────────────────────
-User Idea:
-{user_text}
-
-Intent Metadata:
-{json.dumps(intent, indent=2)}
-
-Structured Design:
-{json.dumps(design_struct, indent=2)}
 
 Mechanics Blueprint:
 {json.dumps(mech_blueprint, indent=2)}
@@ -477,7 +477,7 @@ ENTITIES:
 - Mention key variables and interactions
 
 CONTROLS:
-- Describe control mappings and how player movement/actions work
+- Describe control mappings and how player movement/actions work on top left corner
 
 GAME LOOP:
 - Describe the frame update process
@@ -604,11 +604,6 @@ Color Palette: {color_palette}
 Controls: {control_text}
 
 ═══════════════════════════════════════════════════════════
-📘 DESIGN SUMMARY
-═══════════════════════════════════════════════════════════
-{design_summary}
-
-═══════════════════════════════════════════════════════════
 ⚙️ MECHANICS BLUEPRINT
 ═══════════════════════════════════════════════════════════
 {json.dumps(mechanics, indent=2)}
@@ -630,14 +625,11 @@ Follow these rules when generating the code:
 
 1. **Use Phaser 3** only.
 2. No external files, images, or assets — draw entities using Phaser's graphics API.
-3. Implement all entities, collisions, and behaviors mentioned in the pseudocode or blueprint.
+3. Implement all entities, collisions, and behaviors mentioned in blueprint.
 4. Background and lighting should visually match the theme.
 5. Include proper UI (score, health, etc.) in the top corners.
-6. The game must be playable immediately after load.
-7. Use comments generously to explain how the logic implements each mechanic.
-8. Add subtle particle effects, simple animations, and responsive controls.
 9. Include a restart mechanism on game over.
-10. Maintain performance — avoid excessive loops or physics calls.
+
 
 ═══════════════════════════════════════════════════════════
 📄 OUTPUT REQUIREMENT
@@ -735,12 +727,9 @@ def review_code(state: GameAgentState) -> GameAgentState:
     # Construct enhanced review prompt
     prompt = f"""
 You are reviewing this HTML Phaser 3 game.
+========================IMPORTANT========================
 make sure this game is playable and correct phaser API are used
 
-──────────────────────────────
-USER INTENT
-──────────────────────────────
-{json.dumps(intent, indent=2)}
 
 ──────────────────────────────
 MECHANICS BLUEPRINT (SUMMARY)
@@ -748,7 +737,7 @@ MECHANICS BLUEPRINT (SUMMARY)
 {json.dumps(mechanics, indent=2)}
 
 ──────────────────────────────
-GAME CODE (first 8000 chars)
+GAME CODE 
 ──────────────────────────────
 {code}
 
