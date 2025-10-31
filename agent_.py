@@ -1,3 +1,4 @@
+
 import os
 import json
 import uuid
@@ -9,21 +10,20 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+if "GOOGLE_API_KEY" not in os.environ:
+    raise ValueError("GOOGLE_API_KEY environment variable not set. Please set it before running.")
 
-if "OPENAI_API_KEY" not in os.environ:
-    raise ValueError("OPENAI_API_KEY environment variable not set. Please set it before running.")
-
+# LangGraph imports
 from langgraph.graph import StateGraph, END
 from langgraph.types import interrupt
 from langgraph.checkpoint.memory import MemorySaver
 
+# Gemini LLM wrapper
+from langchain_google_genai import ChatGoogleGenerativeAI
 
-from langchain_openai import ChatOpenAI
+# Initialize LLM (Gemini)
+llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro")
 
-
-llm = ChatOpenAI(
-    model=os.getenv("OPENAI_MODEL", "gpt-5"),  # Options: gpt-4o, gpt-4o-mini, gpt-4.1, etc.
-)
 
 # -------------------------
 # State type definition
@@ -49,8 +49,7 @@ class GameAgentState(TypedDict, total=False):
     user_feedback: str
     feedback_iteration: int
     feedback_history: List[Dict[str, str]]
-    mechanics_blueprint: Dict[str, Any]  
-    pseudocode_plan: str
+
 
 
 # -------------------------
@@ -63,20 +62,17 @@ def log_timestamp(message: str):
 
 
 def safe_json_parse(s: str):
-    """Attempt to safely parse JSON from model output, even if wrapped in Markdown or text."""
-    import json, re
-
-    # Remove markdown fences
-    s = re.sub(r"^```(?:json)?", "", s.strip(), flags=re.IGNORECASE | re.MULTILINE)
-    s = re.sub(r"```$", "", s.strip(), flags=re.MULTILINE)
-
-    # Try direct JSON parse
+    """
+    Try to find and parse the first JSON object in string s.
+    Returns Python object or raises ValueError.
+    """
+    # Quick try full string
     try:
         return json.loads(s)
     except Exception:
         pass
 
-    # Try to extract JSON-like substring
+    # Try to locate JSON-like substring
     m = re.search(r'(\{[\s\S]*\})', s)
     if m:
         try:
@@ -84,6 +80,7 @@ def safe_json_parse(s: str):
         except Exception:
             pass
 
+    # Try array case
     m2 = re.search(r'(\[[\s\S]*\])', s)
     if m2:
         try:
@@ -93,17 +90,18 @@ def safe_json_parse(s: str):
 
     raise ValueError("No JSON found in string")
 
+
 def llm_invoke_text(prompt: str) -> str:
-    """Invoke OpenAI and return the raw textual content (string)."""
-    log_timestamp("🔄 Calling OpenAI API...")
+    """Invoke Gemini and return the raw textual content (string)."""
+    log_timestamp("🔄 Calling Gemini API...")
     start_time = datetime.now()
-
+    
     resp = llm.invoke(prompt)
-
+    
     elapsed = (datetime.now() - start_time).total_seconds()
-    log_timestamp(f"✅ OpenAI API responded in {elapsed:.2f}s")
-
-    # LangChain ChatOpenAI returns message-like object
+    log_timestamp(f"✅ Gemini API responded in {elapsed:.2f}s")
+    
+    # Depending on the wrapper, resp may have .content or .text; try both
     content = getattr(resp, "content", None) or getattr(resp, "text", None) or str(resp)
     return content.strip()
 
@@ -185,7 +183,7 @@ def generate_questions(state: GameAgentState) -> GameAgentState:
     log_timestamp(f"🎯 Generating questions based on intent: {intent.get('summary', 'N/A')[:80]}...")
 
     prompt = f"""
-You are a senior game designer and UX writer building *SMALL MINI GAMES* for phaserjs that will be run online and played once. The user idea: {json.dumps(user_text)}
+You are a senior game designer and UX writer building mini games for phaserjs. The user idea: {json.dumps(user_text)}
 
 Use the user's intent metadata (if available) to craft 6 clarifying questions that will get the information needed to author a aimple 2D playable game.
 
@@ -282,9 +280,9 @@ def generate_mechanics_blueprint(state: GameAgentState) -> GameAgentState:
     print(qa_combined)
 
     prompt = f"""
-
+You are a senior **game systems designer and art director** working together.
 Using the following information, generate a **comprehensive pseudocode-style blueprint** for both the mechanics and the presentation of a 2D game.
-The Game is supposed to be a small mini game with 5-10 mins of playtime , with basic minimal control and features
+
 ────────────────────────
 User Idea:
 {user_text}
@@ -370,18 +368,7 @@ Return JSON with the following structure:
   "camera_behavior": "fixed | follow player | scrolling | zoom",
   "win_condition": "explicit condition",
   "lose_condition": "explicit condition",
-  "estimated_complexity": "low|medium|high",
-  "developer_notes": {{
-    "game_type": "runner | platformer | top_down_survival | shooter | puzzle | sandbox",
-    "core_loop_focus": "movement + collision + scoring | exploration + crafting | combat + waves",
-    "loop_frequency": "frame_based | timed | event_driven",
-    "control_mode": "keyboard | mouse | tap | hybrid",
-    "logic_priority": "performance | simplicity | precision | dynamic_interaction"
-  }},
-  "pseudocode_hint": [
-    "Short, direct tips to help translate this blueprint into pseudocode logic",
-    "Example: use deltaTime for physics, auto-scroll camera instead of moving player, etc."
-  ]
+  "estimated_complexity": "low|medium|high"
 }}
 
 ────────────────────────
@@ -422,6 +409,35 @@ Guidelines:
     state["mechanics_blueprint"] = blueprint
     return state
 
+def complexity_branch(state: GameAgentState):
+    """
+    Branches based on the game's estimated complexity.
+    Routes to pseudocode generation for medium/high complexity,
+    or directly to prompt build for low complexity.
+    """
+    print("\n" + "="*60)
+    print("---NODE: COMPLEXITY BRANCH---")
+    print("="*60)
+    
+    # Try to detect complexity from structured blueprint or mechanics
+    design_struct = state.get("design_doc_structured", {})
+    mechanics = state.get("mechanics_blueprint", {})
+    est_complexity = (
+        mechanics.get("estimated_complexity") or 
+        design_struct.get("estimated_complexity") or 
+        "medium"
+    ).lower()
+    
+    log_timestamp(f"🧠 Detected game complexity: {est_complexity}")
+    
+    if est_complexity in ["low", "simple"]:
+        log_timestamp("⚡ Simple game — skipping pseudocode generation.")
+        next_node = "build_code_prompt"
+    else:
+        log_timestamp("🧩 Medium/High complexity — generating pseudocode plan.")
+        next_node = "generate_pseudocode_plan"
+    
+    return next_node
 
 def generate_pseudocode_plan(state: GameAgentState) -> GameAgentState:
     print("\n" + "="*60)
@@ -434,16 +450,13 @@ def generate_pseudocode_plan(state: GameAgentState) -> GameAgentState:
     intent = state.get("intent", {})
 
     log_timestamp("🧩 Generating human-readable pseudocode plan...")
-    print("==================================================================================================")
-    print (f"Using The BluePrint as {mech_blueprint}")
-    print("==================================================================================================")
 
     prompt = f"""
-You are a senior 2D PhaserJS game developer planning the gameplay logic before implementation.
-The Game is supposed to be a minimal Mini Game with 5-10 mins of play time with minimal features and controls.
-Your task is to write a **clear, structured pseudocode plan** that matches the provided blueprint .
-Do not invent new entities or controls.
-Detect the game type (runner, shooter, platformer, etc.) from the blueprint and write code that reflects that style precisely.
+You are a senior 2D phaserJS game developer planning the gameplay logic before implementation.
+
+Your task is to write a **clear, structured pseudocode plan** — like an annotated script — that explains how the game should work, step by step.  
+Use indentation, comments, and consistent formatting.  
+The pseudocode should feel like real development planning notes, not JSON.
 
 ──────────────────────────────
 GAME DESIGN INPUTS
@@ -451,14 +464,6 @@ GAME DESIGN INPUTS
 
 Mechanics Blueprint:
 {json.dumps(mech_blueprint, indent=2)}
-
-──────────────────────────────
-STRICT RULES
-──────────────────────────────
-- The pseudocode MUST strictly reflect the entities, controls, and gameplay loop from the blueprint above.
-- DO NOT introduce new entities (like enemies, bullets, or projectiles) unless explicitly present.
-- Match the blueprint’s environment, controls, and core loop exactly (e.g., if it’s a runner, show continuous forward movement and jumping).
-- Be formatted like annotated developer notes with clear indentation and “//” comments.
 
 ──────────────────────────────
 OUTPUT FORMAT
@@ -470,57 +475,55 @@ SETUP:
 - Asset placeholders (procedural shapes if mentioned)
 
 ENTITIES:
-- Describe each entity (player, obstacles, collectibles, etc.)
+- Describe each entity (player, enemies, projectiles)
 - Include attributes and behaviors
 - Mention key variables and interactions
 
 CONTROLS:
-- Describe control mappings and how player movement/actions work
+- Describe control mappings and how player movement/actions work on top left corner
 
 GAME LOOP:
 - Describe the frame update process
-- Movement, collisions, and event handling
+- Movement, collisions, AI, and level updates
 
 COLLISIONS:
-- Define collision outcomes (e.g., jump success, obstacle hit, power-up collection)
+- Define collision outcomes (damage, scoring, destruction)
 
 UI + FEEDBACK:
-- HUD elements (score, health, timers)
-- Visual/sound feedback
+- HUD, health, score, level, effects, visual or sound feedback
 
 SPECIAL MECHANICS:
-- Unique systems like boosts, slow motion, shields, etc.
+- Mention unique or creative systems (e.g., time freeze, tentacle shooting, portals)
 
 PROGRESSION:
-- Explain how difficulty or speed scales
+- Explain how the difficulty or level changes
 
 WIN / LOSE CONDITIONS:
 - Define victory and defeat clearly
 
 ART + AUDIO NOTES:
-- Mention color palette, style, lighting, animations, and ambient music
+- Mention colors, style, lighting, animations, and ambient music direction
 
 ──────────────────────────────
 Guidelines:
 ──────────────────────────────
-- Be descriptive but concise.
+- Be descriptive, but concise.
 - Use “//” comments liberally to annotate reasoning.
+- Write as if another developer will implement it.
 - Keep indentation consistent.
 - Avoid JSON or natural-language paragraphs.
-- Do not invent content beyond the blueprint.
-
-──────────────────────────────
-Example (neutral structure, not prescriptive):
-──────────────────────────────
+- Example:
     SETUP:
-        // Initialize Phaser game window and physics
+        // Initialize Phaser game with 800x600 window
+        // Enable Arcade physics, gravity = 0
     ENTITIES:
         player:
-            // Define movement and interactions as per blueprint (e.g., jump, auto-run,shoot,punch)
-        obstacle:
-            // Define hazards from blueprint (e.g., pits,aliens,ghost,zombies)
+            // Moves with WASD, shoots with SPACE
+            // Has 100 HP, 3 lives
+        enemy:
+            // Spawns at random edges, chases player
+            // Explodes on hit
 """
-
 
     out = llm_invoke_text(prompt)
 
@@ -588,9 +591,9 @@ def build_code_prompt(state: GameAgentState) -> GameAgentState:
     prompt = f"""
 You are an expert **Phaser 3** game developer.
 Generate a **fully functional**, playable HTML game using Phaser 3 based on the following data.
-Provide a control instruction manual at top right corner
+
 Your goal:
-- Create a self-contained, bug-free Phaser 3 game , with pretty/retro visuals.
+- Create a self-contained, bug-free Phaser 3 game.
 - Reflect the mechanics, pseudocode, and art/environment styles provided.
 - The game must load and run directly in the browser with no external assets.
 - Use procedural shapes for all sprites and effects and make sure they look like characters (have hands , eyes etc) and not just (squares , triangle , shapes etc)
@@ -1123,7 +1126,7 @@ workflow.add_node("finalize_output", finalize_output)
 workflow.add_node("collect_user_feedback", collect_user_feedback)
 workflow.add_node("apply_feedback_to_code", apply_feedback_to_code)
 workflow.add_node("verify_feedback_applied", verify_feedback_applied)
-
+workflow.add_node("complexity_branch", complexity_branch)
 workflow.add_node("generate_pseudocode_plan", generate_pseudocode_plan)
 
 # Entry point
@@ -1135,7 +1138,14 @@ workflow.add_edge("collect_user_idea", "generate_questions")
 workflow.add_edge("generate_questions", "collect_user_answers")
 workflow.add_edge("collect_user_answers", "validate_inputs")
 workflow.add_edge("validate_inputs", "generate_mechanics_blueprint")
-workflow.add_edge("generate_mechanics_blueprint", "generate_pseudocode_plan")
+workflow.add_conditional_edges(
+    "generate_mechanics_blueprint",
+    complexity_branch,
+    {
+        "generate_pseudocode_plan": "generate_pseudocode_plan",
+        "build_code_prompt": "build_code_prompt",
+    },
+)
 workflow.add_edge("generate_pseudocode_plan", "build_code_prompt")
 workflow.add_edge("build_code_prompt", "generate_game_code")
 workflow.add_edge("generate_game_code", "review_code")
@@ -1147,7 +1157,7 @@ workflow.add_edge("verify_feedback_applied", "review_code")
 
 
 # conditional: if review fail -> fix_game_code else finalize_output
-def review_branch(state: GameAgentState): 
+def review_branch(state: GameAgentState):
     rn = state.get("review_notes") or {}
     status = rn.get("status", "fail")
     next_node = "fix_game_code" if status == "fail" else "finalize_output"

@@ -7,3 +7,4 @@ langchain-google-genai
 pydantic
 httpx
 starlette
+langchain_openai
