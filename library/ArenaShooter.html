@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Top-Down Arena - Phaser Template</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    html,body { margin:0; padding:0; background:#0b0f1a; height:100%; }
+    #game { width:100vw; height:100vh; display:block; }
+    .hint { position: absolute; right: 12px; top: 12px; color:#ddd; font-family: monospace; font-size:13px; background: rgba(0,0,0,0.25); padding:8px; border-radius:6px;}
+  </style>
+</head>
+<body>
+  <div class="hint">WASD / Arrow keys to move • Click to shoot</div>
+
+  <!-- REGION:CONFIG_START -->
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+  <script>
+  const CONFIG = {
+    type: Phaser.AUTO,
+    parent: null,
+    width: Math.min(900, window.innerWidth),
+    height: Math.min(700, window.innerHeight),
+    backgroundColor: 0x071022,
+    physics: {
+      default: 'arcade',
+      arcade: { debug: false, gravity: { y: 0 } }
+    },
+    scene: [ArenaScene]
+  };
+  </script>
+  <!-- REGION:CONFIG_END -->
+
+  <!-- REGION:SCENE_CLASS_START -->
+  <script>
+  class ArenaScene extends Phaser.Scene {
+    constructor() { super({ key: 'ArenaScene' }); }
+    preload() {}
+    create() {
+      // world bounds
+      this.cameras.main.setBackgroundColor('#071022');
+      this.worldBounds = new Phaser.Geom.Rectangle(0, 0, this.scale.width, this.scale.height);
+
+      // groups
+      this.bullets = this.physics.add.group({ classType: Bullet, runChildUpdate: true });
+      this.enemies = this.physics.add.group({ runChildUpdate: true });
+
+      // player
+      this.createPlayer();
+
+      // input
+      this.cursors = this.input.keyboard.createCursorKeys();
+      this.keys = this.input.keyboard.addKeys('W,A,S,D');
+      this.input.on('pointerdown', (p) => this.playerShoot(p));
+
+      // spawn loop
+      this.time.addEvent({ delay: 900, callback: this.spawnEnemy, callbackScope: this, loop: true });
+
+      // UI
+      this.score = 0;
+      this.health = 5;
+      this.createUI();
+
+      // collisions
+      this.physics.add.overlap(this.bullets, this.enemies, this.onBulletHitEnemy, null, this);
+      this.physics.add.overlap(this.player, this.enemies, this.onPlayerHit, null, this);
+    }
+
+    update(time, delta) {
+      this.updatePlayer();
+      // remove off-screen bullets
+      this.bullets.children.iterate(b => { if (b && !Phaser.Geom.Rectangle.Overlaps(this.worldBounds, b.getBounds())) b.destroy(); });
+    }
+  }
+  </script>
+  <!-- REGION:SCENE_CLASS_END -->
+
+  <!-- REGION:PLAYER_LOGIC_START -->
+  <script>
+  // Simple procedural player: circle with eyes
+  ArenaScene.prototype.createPlayer = function() {
+    const x = this.scale.width / 2;
+    const y = this.scale.height / 2;
+    const g = this.add.graphics();
+    g.fillStyle(0x47c6ff, 1);
+    g.fillCircle(0, 0, 18);
+    // eyes
+    g.fillStyle(0xffffff, 1);
+    g.fillCircle(-6, -6, 4);
+    g.fillCircle(6, -6, 4);
+    // pupils
+    g.fillStyle(0x111111, 1);
+    g.fillCircle(-6, -6, 2);
+    g.fillCircle(6, -6, 2);
+
+    const textureKey = 'playerTex';
+    g.generateTexture(textureKey, 48, 48);
+    g.destroy();
+
+    this.player = this.physics.add.sprite(x, y, textureKey);
+    this.player.setCollideWorldBounds(true);
+    this.player.speed = 180;
+    this.player.lastFired = 0;
+  };
+
+  ArenaScene.prototype.updatePlayer = function() {
+    const p = this.player;
+    p.body.setVelocity(0);
+
+    const left = this.cursors.left.isDown || this.keys.A.isDown;
+    const right = this.cursors.right.isDown || this.keys.D.isDown;
+    const up = this.cursors.up.isDown || this.keys.W.isDown;
+    const down = this.cursors.down.isDown || this.keys.S.isDown;
+
+    if (left) p.body.setVelocityX(-p.speed);
+    if (right) p.body.setVelocityX(p.speed);
+    if (up) p.body.setVelocityY(-p.speed);
+    if (down) p.body.setVelocityY(p.speed);
+
+    // rotate to pointer
+    const pointer = this.input.activePointer;
+    const angle = Phaser.Math.Angle.Between(p.x, p.y, pointer.worldX, pointer.worldY);
+    p.rotation = angle;
+  };
+
+  ArenaScene.prototype.playerShoot = function(pointer) {
+    const now = this.time.now;
+    if (now - this.player.lastFired < 200) return; // fire rate
+    this.player.lastFired = now;
+
+    const b = this.bullets.get();
+    if (b) {
+      b.fire(this.player.x, this.player.y, this.player.rotation);
+    }
+  };
+
+  // Bullet class
+  function Bullet(scene, x, y) {
+    Phaser.Physics.Arcade.Sprite.call(this, scene, x, y, null);
+    this.scene = scene;
+  }
+  Bullet.prototype = Object.create(Phaser.Physics.Arcade.Sprite.prototype);
+  Bullet.prototype.constructor = Bullet;
+
+  Bullet.prototype.fire = function(x, y, rotation) {
+    if (!this.body) {
+      this.scene.physics.world.enable(this);
+      this.scene.add.existing(this);
+      // procedural texture for bullet
+      const g = this.scene.add.graphics();
+      g.fillStyle(0xffff66, 1); g.fillCircle(0,0,5);
+      g.generateTexture('bulletTex', 12, 12);
+      g.destroy();
+      this.setTexture('bulletTex');
+    }
+    this.setActive(true);
+    this.setVisible(true);
+    this.enableBody(true, x, y, true, true);
+    this.setDepth(2);
+    const speed = 420;
+    this.scene.physics.velocityFromRotation(rotation, speed, this.body.velocity);
+    // life timer
+    this.scene.time.delayedCall(1800, () => { if (this) this.destroy(); });
+  };
+
+  Bullet.prototype.update = function() {
+    // noop; lifetime handled via timer
+  };
+  </script>
+  <!-- REGION:PLAYER_LOGIC_END -->
+
+  <!-- REGION:ENEMY_LOGIC_START -->
+  <script>
+  ArenaScene.prototype.spawnEnemy = function() {
+    const edge = Phaser.Math.Between(0,3);
+    let x,y;
+    if (edge === 0) { x = Phaser.Math.Between(0, this.scale.width); y = -20; }
+    else if (edge === 1) { x = this.scale.width + 20; y = Phaser.Math.Between(0, this.scale.height); }
+    else if (edge === 2) { x = Phaser.Math.Between(0, this.scale.width); y = this.scale.height + 20; }
+    else { x = -20; y = Phaser.Math.Between(0, this.scale.height); }
+
+    // procedural enemy texture
+    const key = 'enemyTex';
+    if (!this.textures.exists(key)) {
+      const g = this.add.graphics();
+      g.fillStyle(0xff6b6b,1); g.fillCircle(0,0,14);
+      g.fillStyle(0x000000, 1); g.fillRect(-6,4,12,6); // mouth
+      g.generateTexture(key, 32, 32); g.destroy();
+    }
+
+    const enemy = this.enemies.create(x, y, key);
+    enemy.setDepth(1);
+    enemy.hp = 1 + Phaser.Math.Between(0,2);
+    enemy.speed = 60 + Phaser.Math.Between(0,80);
+    enemy.setCircle(14);
+    enemy.update = function() {
+      if (!this.scene || !this.active) return;
+      this.scene.physics.moveToObject(this, this.scene.player, this.speed);
+      this.rotation = Phaser.Math.Angle.Between(this.x, this.y, this.scene.player.x, this.scene.player.y);
+    };
+  };
+
+  ArenaScene.prototype.onBulletHitEnemy = function(bullet, enemy) {
+    try { bullet.destroy(); } catch(e){}
+    enemy.hp -= 1;
+    if (enemy.hp <= 0) {
+      // explosion effect (simple flash + destroy)
+      const e = this.add.circle(enemy.x, enemy.y, 22, 0xffe08a, 0.9);
+      this.tweens.add({ targets: e, alpha: 0, scale: 1.6, duration: 300, onComplete: ()=> e.destroy() });
+      enemy.destroy();
+      this.score += 10;
+      this.scoreText.setText('Score: ' + this.score);
+    }
+  };
+  </script>
+  <!-- REGION:ENEMY_LOGIC_END -->
+
+  <!-- REGION:COLLISIONS_START -->
+  <script>
+  ArenaScene.prototype.onPlayerHit = function(player, enemy) {
+    // knockback and damage
+    if (!enemy.active) return;
+    enemy.destroy();
+    this.health -= 1;
+    this.healthText.setText('Health: ' + this.health);
+    // hit flash
+    const flash = this.add.rectangle(player.x, player.y, 60, 60, 0xff4444, 0.35);
+    this.tweens.add({ targets: flash, alpha: 0, duration: 300, onComplete: ()=> flash.destroy() });
+
+    if (this.health <= 0) {
+      this.scene.pause();
+      this.showGameOver();
+    }
+  };
+  </script>
+  <!-- REGION:COLLISIONS_END -->
+
+  <!-- REGION:UI_START -->
+  <script>
+  ArenaScene.prototype.createUI = function() {
+    this.scoreText = this.add.text(8, 8, 'Score: 0', { fontFamily: 'monospace', fontSize: 18, color: '#fff' }).setDepth(10);
+    this.healthText = this.add.text(this.scale.width - 110, 8, 'Health: 5', { fontFamily: 'monospace', fontSize: 18, color: '#fff' }).setDepth(10);
+
+    // timer (90 seconds)
+    this.timeLeft = 60;
+    this.timerText = this.add.text(8, 32, 'Time: ' + this.timeLeft, { fontFamily: 'monospace', fontSize: 16, color: '#ddd' }).setDepth(10);
+    this.timeEvent = this.time.addEvent({ delay: 1000, callback: ()=> {
+      this.timeLeft -= 1;
+      this.timerText.setText('Time: ' + this.timeLeft);
+      if (this.timeLeft <= 0) {
+        this.scene.pause();
+        this.showGameOver(true);
+      }
+    }, callbackScope: this, loop: true });
+  };
+
+  ArenaScene.prototype.showGameOver = function(win=false) {
+    const msg = win ? 'You Survived!' : 'Game Over';
+    this.gameOverText = this.add.text(this.scale.width/2, this.scale.height/2 - 20, msg, { fontFamily:'monospace', fontSize: 34, color:'#fff' }).setOrigin(0.5);
+    this.finalScoreText = this.add.text(this.scale.width/2, this.scale.height/2 + 20, 'Score: ' + this.score, { fontFamily:'monospace', fontSize:20, color:'#fff' }).setOrigin(0.5);
+    // show restart hint
+    this.restartHint = this.add.text(this.scale.width/2, this.scale.height/2 + 64, 'Click to Restart', { fontFamily:'monospace', fontSize:14, color:'#ddd' }).setOrigin(0.5);
+    this.input.once('pointerdown', ()=> this.scene.restart());
+  };
+  </script>
+  <!-- REGION:UI_END -->
+
+  <!-- REGION:RESTART_LOGIC_START -->
+  <script>
+  // Boot
+  window.onload = () => {
+    // Ensure ArenaScene is defined for config above
+    const config = {
+      type: Phaser.AUTO,
+      width: Math.min(900, window.innerWidth),
+      height: Math.min(700, window.innerHeight),
+      backgroundColor: 0x071022,
+      physics: { default: 'arcade', arcade: { debug: false, gravity: { y: 0 } } },
+      scene: [ArenaScene]
+    };
+    const game = new Phaser.Game(config);
+    // small resize handler
+    window.addEventListener('resize', ()=> {
+      game.scale.resize(Math.min(900, window.innerWidth), Math.min(700, window.innerHeight));
+    });
+  };
+  </script>
+  <!-- REGION:RESTART_LOGIC_END -->
+</body>
+</html>

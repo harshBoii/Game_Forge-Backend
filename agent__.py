@@ -11,7 +11,8 @@ from dotenv import load_dotenv
 from langgraph.graph import StateGraph, END
 from langgraph.types import interrupt
 from langgraph.checkpoint.memory import MemorySaver
-from langchain_anthropic import ChatAnthropic
+from langchain_openai import ChatOpenAI
+
 
 
 # ================================================
@@ -22,14 +23,13 @@ MAX_FIX_ITERATIONS = 2
 MAX_FEEDBACK_ITERATIONS = 2
 
 
-if "ANTHROPIC_API_KEY" not in os.environ:
-    raise ValueError("ANTHROPIC_API_KEY environment variable not set. Please set it before running.")
+def get_llm(model_name: str | None = None):
+    """Create an Anthropic LLM client with a specified model name."""
+    chosen_model = model_name 
+    print(f"🧠 Using model: {chosen_model}")
+    return ChatOpenAI(model=chosen_model)
 
-
-llm = ChatAnthropic(
-    model=os.getenv("ANTHROPIC_MODEL", "claude-opus-4-1-20250805"),
-)
-
+llm=""
 
 # ================================================
 #  STATE DEFINITION
@@ -50,7 +50,7 @@ class GameAgentState(TypedDict, total=False):
     user_feedback: str  # ✅ Added
     feedback_iteration: int  # ✅ Added
     feedback_history: List[Dict[str, Any]]  # ✅ Added
-
+    model_name : str
 
 
 # ================================================
@@ -85,13 +85,22 @@ def safe_json_parse(s: str):
 
 
 
-def llm_invoke_text(prompt: str, retries: int = 3, delay: float = 2.0) -> str:
-    """Call LLM with retry mechanism."""
+def llm_invoke_text(prompt: str, state: GameAgentState | None = None, retries: int = 3, delay: float = 2.0) -> str:
+    """Call the LLM dynamically with retry mechanism, using the model from state if available."""
+    model_name = None
+
+    # ✅ Try to use model from state if provided
+    if state and "model_name" in state:
+        model_name = state["model_name"]
+
+    # ✅ Fallback to global default
+    active_llm = get_llm(model_name)
+
     for attempt in range(1, retries + 1):
         try:
-            log_timestamp(f"🔄 LLM call (attempt {attempt})...")
+            log_timestamp(f"🔄 LLM call (attempt {attempt})... [model={model_name or 'default'}]")
             start = time.time()
-            resp = llm.invoke(prompt)
+            resp = active_llm.invoke(prompt)
             content = getattr(resp, "content", None) or getattr(resp, "text", None) or str(resp)
             elapsed = time.time() - start
             log_timestamp(f"✅ Response in {elapsed:.2f}s")
@@ -100,8 +109,6 @@ def llm_invoke_text(prompt: str, retries: int = 3, delay: float = 2.0) -> str:
             log_timestamp(f"⚠️ LLM call failed ({e}). Retry in {delay}s...")
             time.sleep(delay)
     raise RuntimeError("❌ LLM failed after multiple retries.")
-
-
 
 # ================================================
 #  NODES
@@ -123,10 +130,10 @@ def generate_questions(state: GameAgentState) -> GameAgentState:
 You are a Phaser mini-game UX designer.
 
 
-Generate 6 concise multiple-choice questions to help design a simple 2D mini-game (like dress-up, football, or board game).
+Generate 3 concise multiple-choice questions to help design a simple and feasible  2D mini-game that can be made using phaser and llm (like dress-up, football, or board game).
 
 
-For each question, include 3–5 options and mark if required.
+For each question, include 3 options and mark if required.
 
 
 Respond as JSON:
@@ -139,7 +146,7 @@ Respond as JSON:
 User Idea:
 \"\"\"{user_text}\"\"\"
 """
-    out = llm_invoke_text(prompt)
+    out = llm_invoke_text(prompt, state)
     try:
         state["questions"] = safe_json_parse(out)
         log_timestamp(f"✅ Generated {len(state['questions'])} questions.")
@@ -177,7 +184,7 @@ def identify_game_template(state: GameAgentState) -> GameAgentState:
     qna = state.get("answers", [])
     user_text = state.get("user_raw_input", "")
     prompt = f"""
-You are a Phaser game classifier.
+You are a game classifier.
 
 
 Given the user's idea and Q&A, choose EXACTLY ONE template name from:
@@ -195,7 +202,7 @@ Q&A:
 Respond JSON:
 {{"chosen_template": "<exact_name>"}}
 """
-    out = llm_invoke_text(prompt)
+    out = llm_invoke_text(prompt, state)
     try:
         parsed = safe_json_parse(out)
         state["chosen_template"] = parsed["chosen_template"]
@@ -228,7 +235,7 @@ def suggest_visual_feature_changes(state: GameAgentState) -> GameAgentState:
 
 
     prompt = f"""
-You are customizing a Phaser mini-game.
+You are customizing a mini-game that will be build using phaser , html and js by a LLM model.
 
 
 User Idea:
@@ -246,16 +253,15 @@ Base Game Code (snippet):
 {base_code}
 
 
-Suggest specific changes to visuals and gameplay features that fit the user's preferences.
-
+Suggest minor and simple and feasible specific changes to visuals and gameplay features that fit the user's preferences AND CAN BE MADE USING LLM.
+tweak only what is necessary , be very controlled while making changes do not be extensive
 
 Respond JSON only:
 {{
-  "visual_changes": ["list of color, background, character, or UI changes"],
-  "feature_changes": ["simple gameplay tweaks like add timer, score, or sounds"]
+  "Changes": ["part of code that needs to be changed/replaced and with what new code to replaced with" ]
 }}
 """
-    out = llm_invoke_text(prompt)
+    out = llm_invoke_text(prompt, state)
     try:
         mods = safe_json_parse(out)
         state["game_modifications"] = mods
@@ -270,30 +276,30 @@ Respond JSON only:
 def apply_changes_to_template(state: GameAgentState) -> GameAgentState:
     print("\n=== NODE: APPLY CHANGES TO TEMPLATE ===")
     changes = state.get("game_modifications", {})
+    print(f"Changes are {changes}")
     base_code = state.get("base_template_code", "")
     prompt = f"""
-You are a Phaser 3 developer.
+You are a js developer also using phaser and html.
 
 
 TASK:
 Apply the following modifications to this game code safely without breaking it.
+do not cause overrides of funsction , scenes or anything.
 
 
-VISUAL CHANGES:
-{json.dumps(changes.get('visual_changes', []), indent=2)}
+
+{json.dumps(changes.get('Changes', []), indent=2)}
 
 
-FEATURE CHANGES:
-{json.dumps(changes.get('feature_changes', []), indent=2)}
 
 
 Return the COMPLETE working HTML (no markdown).
 
-
+Below is The existing code , use it as a base
 ────────────────────────────
 {base_code}
 """
-    out = llm_invoke_text(prompt)
+    out = llm_invoke_text(prompt, state)
     html = re.sub(r"^```(?:html)?\s*", "", out.strip())
     html = re.sub(r"\s*```$", "", html)
     state["generated_code"] = html
@@ -335,53 +341,12 @@ def review_code(state: GameAgentState) -> GameAgentState:
 You are reviewing this HTML Phaser 3 game.
 ========================IMPORTANT========================
 make sure this game is playable and correct phaser API are used
-
-
-
-──────────────────────────────
-MECHANICS BLUEPRINT (SUMMARY)
-──────────────────────────────
-{json.dumps(mechanics, indent=2)}
-
+Do not worry about best practices and functions overrides , if anything does not cause runTime error then pass it
 
 ──────────────────────────────
 GAME CODE 
 ──────────────────────────────
 {code}
-
-
-──────────────────────────────
-REVIEW CHECKLIST
-──────────────────────────────
-
-
-
-2. **Engine Sanity**
-   eg:-
-   - Any invalid Phaser API calls? (e.g., createCanvas().draw())
-   - Missing generateTexture() before sprite use?
-   - Proper use of preload(), create(), and update()?
-
-
-
-3. **Visual Sanity**
-   eg:-
-   - Would something visible appear when loaded? (background, entities, text)
-   - Are key sprites drawn or filled with color?
-
-
-4. **Core Mechanics**
-   eg:-
-   - Is the player controllable (e.g., WASD or arrow keys)?
-   - Is there a visible feedback loop (score, health)?
-   - Do collisions or interactions occur?
-
-
-5. **Functional Stability**
-   eg:-
-   - Any logic that could crash or hang (undefined vars, missing textures)?
-   - GameOver / Restart systems functioning?
-
 
 ──────────────────────────────
 RESPONSE FORMAT (STRICT JSON)
@@ -396,7 +361,7 @@ Return a JSON object:
 
 
     log_timestamp("🧠 Running multi-level review (intent + visual + engine)...")
-    out = llm_invoke_text(prompt)
+    out = llm_invoke_text(prompt, state)
 
 
     print("\n" + "-"*60)
@@ -497,9 +462,6 @@ def fix_game_code(state: GameAgentState) -> GameAgentState:
 You are a game developer fixing code based on QA feedback.
 
 
-ENGINE: {engine}
-
-
 ISSUES IDENTIFIED:
 {json.dumps(issues, indent=2)}
 
@@ -523,7 +485,7 @@ Start with: <!DOCTYPE html>
 """
     
     log_timestamp("⏳ Calling LLM to fix code...")
-    out = llm_invoke_text(prompt)
+    out = llm_invoke_text(prompt, state)
     
     # ✅ Log raw fix response
     print("\n" + "-"*60)
@@ -666,9 +628,9 @@ CURRENT GAME CODE:
 {code}
 """
     
-    log_timestamp("⏳ Calling Claude API...")
-    out = llm_invoke_text(prompt)
-    log_timestamp("✅ Claude API responded")
+    log_timestamp("⏳ Calling OpenAI API...")
+    out = llm_invoke_text(prompt, state)
+    log_timestamp("✅ OpenAI API responded")
 
 
     # Extract HTML from response
@@ -693,9 +655,9 @@ CURRENT CODE:
 
 Return ONLY the modified HTML. No markdown. Start with <!DOCTYPE html>
 """
-        log_timestamp("⏳ Calling Claude API with stronger prompt...")
+        log_timestamp("⏳ Calling OpenAI API with stronger prompt...")
         out = llm_invoke_text(stronger_prompt)
-        log_timestamp("✅ Claude API responded")
+        log_timestamp("✅ OpenAI API responded")
 
 
         # Extract HTML from response
@@ -730,7 +692,7 @@ Code: {code}
 Respond JSON only:
 {{ "implemented": true|false, "evidence": "brief reason" }}
 """
-    out = llm_invoke_text(prompt)
+    out = llm_invoke_text(prompt, state)
     try:
         result = safe_json_parse(out)
         if not result.get("implemented", True):

@@ -9,13 +9,14 @@ from pydantic import BaseModel
 from typing import List, Dict
 
 from langgraph.types import Command
-from agent import (
+from agent__ import (
     game_agent_app,
     GameAgentState,
     apply_feedback_to_code,
     review_code,
     fix_game_code,
     finalize_output,
+    get_llm
 )
 
 # ============================================================
@@ -42,12 +43,12 @@ GAME_SESSIONS: Dict[str, GameAgentState] = {}
 # ============================================================
 class StartRequest(BaseModel):
     prompt: str
-
+    model: str | None = None
 
 class ResumeRequest(BaseModel):
     session_id: str
     answers: List[Dict[str, str]]
-
+    model: str | None = None
 
 class FeedbackRequest(BaseModel):
     session_id: str
@@ -65,9 +66,19 @@ async def start_game(req: StartRequest):
     """
     try:
         session_id = str(uuid.uuid4())
+        model_name = req.model or os.getenv("ANTHROPIC_MODEL")
+        
+        # ✅ dynamically create LLM
+        llm_instance = get_llm(model_name)
+
+        # ✅ inject LLM into your agent pipeline
+        game_agent_app.llm = llm_instance
+
         state: GameAgentState = {
             "session_id": session_id,
             "user_raw_input": req.prompt.strip(),
+            "model_name": model_name
+
         }
 
         config = {"configurable": {"thread_id": session_id}}

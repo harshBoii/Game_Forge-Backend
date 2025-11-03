@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Phaser Racing Game Base</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html, body { margin:0; padding:0; background:#111; height:100%; }
+    .hint { position: absolute; right: 12px; top: 12px; color:#ddd; font-family: monospace; font-size:13px; background: rgba(0,0,0,0.25); padding:8px; border-radius:6px; z-index: 1000; }
+  </style>
+</head>
+<body>
+  <div class="hint">↑/↓ accelerate/brake • ←/→ steer</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+
+  <script>
+  /*********************
+   * BASE SCENE TEMPLATE
+   *********************/
+  class BaseRacingScene extends Phaser.Scene {
+    constructor(key = 'BaseRacingScene') {
+      super(key);
+      this.config = {
+        trackCenter: { x: 450, y: 300 },
+        laps: 3
+      };
+    }
+
+    preload() {
+      this.loadAssets();
+    }
+
+    loadAssets() {
+      // Can be overridden to load car/track images or sounds
+      this.generateDefaultCarTexture();
+    }
+
+    generateDefaultCarTexture() {
+      if (!this.textures.exists('defaultCar')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xff5555, 1);
+        g.fillRect(-10, -20, 20, 40);
+        g.fillStyle(0xffffff, 1);
+        g.fillRect(-6, -18, 12, 10);
+        g.generateTexture('defaultCar', 20, 40);
+        g.destroy();
+      }
+    }
+
+    create() {
+      this.createTrack();        // Track drawing or loading
+      this.createPlayer();       // Player car setup
+      this.createCheckpoints();  // Lap checkpoints
+      this.createUI();           // Speed/time/lap text
+
+      this.cursors = this.input.keyboard.createCursorKeys();
+      this.resetRace();
+    }
+
+    resetRace() {
+      this.lap = 1;
+      this.totalLaps = this.config.laps;
+      this.lapStart = this.time.now;
+      this.lapTimes = [];
+      this.checkpointsPassed = new Set();
+      this.canFinishLap = false;
+    }
+
+    update() {
+      this.updatePlayer();
+      this.handleOffTrack();
+      this.checkCheckpoints();
+    }
+
+    /***************************
+     * TRACK AND ENVIRONMENT
+     ***************************/
+    createTrack() {
+      // Default circular track — override this in subclasses
+      const { x: cx, y: cy } = this.config.trackCenter;
+      const inner = 180, outer = 240;
+      const g = this.add.graphics();
+
+      g.fillStyle(0x2d5016, 1).fillCircle(cx, cy, outer + 40);
+      g.fillStyle(0x3a3a3a, 1)
+        .beginPath()
+        .arc(cx, cy, outer, 0, Math.PI * 2)
+        .arc(cx, cy, inner, 0, Math.PI * 2, true)
+        .closePath().fillPath();
+
+      // Save for boundary checks
+      this.trackInnerRadius = inner;
+      this.trackOuterRadius = outer;
+
+      // Start/finish line
+      g.lineStyle(4, 0xffffff, 1);
+      g.lineBetween(cx + inner, cy, cx + outer, cy);
+    }
+
+    createCheckpoints() {
+      this.checkpoints = this.physics.add.staticGroup();
+      const { x: cx, y: cy } = this.config.trackCenter;
+      const mid = (this.trackInnerRadius + this.trackOuterRadius) / 2;
+      const width = this.trackOuterRadius - this.trackInnerRadius;
+      const angles = [0, Math.PI/2, Math.PI, 3*Math.PI/2];
+
+      angles.forEach((angle, i) => {
+        const x = cx + Math.cos(angle) * mid;
+        const y = cy + Math.sin(angle) * mid;
+        const rect = this.add.rectangle(x, y, width, 30, 0x00ff00, 0);
+        this.physics.add.existing(rect, true);
+        rect.checkpointId = i;
+        rect.setRotation(angle);
+        this.checkpoints.add(rect);
+      });
+    }
+
+    /***************************
+     * PLAYER LOGIC
+     ***************************/
+    createPlayer() {
+      // Default player car — override for different car textures
+      const { x: cx, y: cy } = this.config.trackCenter;
+      const r = (this.trackInnerRadius + this.trackOuterRadius) / 2;
+      this.player = this.physics.add.sprite(cx + r, cy, 'defaultCar');
+
+      this.player.speed = 0;
+      this.player.maxSpeed = 250;
+      this.player.accel = 4;
+      this.player.decel = 2;
+      this.player.rotation = -Math.PI / 2;
+    }
+
+    updatePlayer() {
+      const p = this.player;
+      const cursors = this.cursors;
+
+      // Accel/brake
+      if (cursors.up.isDown) p.speed = Math.min(p.speed + p.accel, p.maxSpeed);
+      else if (cursors.down.isDown) p.speed = Math.max(p.speed - p.accel * 1.5, -p.maxSpeed / 2);
+      else p.speed *= 0.97;
+
+      // Steering
+      const turnRate = 0.05 * Math.max(0.3, Math.abs(p.speed) / p.maxSpeed);
+      if (Math.abs(p.speed) > 10) {
+        if (cursors.left.isDown) p.rotation -= turnRate;
+        if (cursors.right.isDown) p.rotation += turnRate;
+      }
+
+      // Apply motion
+      p.setVelocity(Math.cos(p.rotation) * p.speed, Math.sin(p.rotation) * p.speed);
+    }
+
+    handleOffTrack() {
+      const p = this.player;
+      const { x: cx, y: cy } = this.config.trackCenter;
+      const dist = Phaser.Math.Distance.Between(p.x, p.y, cx, cy);
+      if (dist < this.trackInnerRadius || dist > this.trackOuterRadius) {
+        p.speed *= 0.85;
+        p.setTint(0xff9999);
+      } else p.clearTint();
+    }
+
+    /***************************
+     * CHECKPOINTS & LAPS
+     ***************************/
+    checkCheckpoints() {
+      this.physics.overlap(this.player, this.checkpoints, (_, cp) => {
+        const id = cp.checkpointId;
+        if (this.checkpointsPassed.size === 0 && id === 0) {
+          this.checkpointsPassed.add(id);
+        } else if (this.checkpointsPassed.size === 3 && id === 0) {
+          this.completeLap();
+          this.checkpointsPassed.clear();
+        } else if (!this.checkpointsPassed.has(id)) {
+          this.checkpointsPassed.add(id);
+        }
+      });
+    }
+
+    completeLap() {
+      const lapTime = (this.time.now - this.lapStart) / 1000;
+      this.lapTimes.push(lapTime);
+      this.lap++;
+      this.lapText.setText(`Lap: ${this.lap}/${this.totalLaps}`);
+      this.lapStart = this.time.now;
+
+      if (this.lap > this.totalLaps) this.finishRace();
+    }
+
+    finishRace() {
+      this.physics.pause();
+      const total = this.lapTimes.reduce((a,b)=>a+b,0).toFixed(2);
+      const best = Math.min(...this.lapTimes).toFixed(2);
+      const txt = this.add.text(this.scale.width/2, this.scale.height/2, 
+        `🏁 Race Complete!\nTotal: ${total}s\nBest Lap: ${best}s\nClick to Restart`,
+        { fontFamily:'monospace', fontSize:24, color:'#fff', align:'center' }
+      ).setOrigin(0.5);
+      this.input.once('pointerdown', ()=>this.scene.restart());
+    }
+
+    /***************************
+     * UI ELEMENTS
+     ***************************/
+    createUI() {
+      this.speedText = this.add.text(16,16,'Speed: 0',{fontFamily:'monospace',fontSize:18,color:'#fff'});
+      this.lapText = this.add.text(16,40,`Lap: 1/${this.config.laps}`,{fontFamily:'monospace',fontSize:18,color:'#ffff00'});
+      this.timeText = this.add.text(16,64,'Time: 0.00s',{fontFamily:'monospace',fontSize:18,color:'#fff'});
+      
+      this.time.addEvent({
+        delay:100,
+        loop:true,
+        callback:()=>{
+          this.speedText.setText('Speed: ' + Math.abs(Math.round(this.player.speed)));
+          this.timeText.setText('Time: ' + ((this.time.now - this.lapStart)/1000).toFixed(2)+'s');
+        }
+      });
+    }
+  }
+
+  /*********************
+   * CUSTOM GAME EXAMPLE
+   *********************/
+  class CityRaceScene extends BaseRacingScene {
+    constructor() { super('CityRaceScene'); }
+
+    createTrack() {
+      // Example custom track (different style)
+      const g = this.add.graphics();
+      const { x: cx, y: cy } = this.config.trackCenter;
+      const inner = 150, outer = 280;
+
+      g.fillStyle(0x444444, 1);
+      g.beginPath();
+      g.arc(cx, cy, outer, 0, Math.PI * 2);
+      g.arc(cx, cy, inner, 0, Math.PI * 2, true);
+      g.closePath();
+      g.fillPath();
+
+      g.lineStyle(4, 0xffffff, 1);
+      g.lineBetween(cx + inner, cy, cx + outer, cy);
+
+      this.trackInnerRadius = inner;
+      this.trackOuterRadius = outer;
+    }
+
+    createPlayer() {
+      const { x: cx, y: cy } = this.config.trackCenter;
+      const r = (this.trackInnerRadius + this.trackOuterRadius) / 2;
+      this.player = this.physics.add.sprite(cx + r, cy, 'defaultCar');
+      this.player.setScale(1.2);
+      this.player.maxSpeed = 300;
+    }
+  }
+
+  /*********************
+   * GAME CONFIG
+   *********************/
+  const config = {
+    type: Phaser.AUTO,
+    width: 900,
+    height: 600,
+    backgroundColor: 0x0a0a0a,
+    physics: { default: 'arcade', arcade: { debug: false } },
+    scene: [CityRaceScene]
+  };
+
+  window.onload = () => new Phaser.Game(config);
+  </script>
+</body>
+</html>

@@ -1,0 +1,409 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Camping Adventure - Phaser Game</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html,body { margin:0; padding:0; background:#021; height:100%; }
+    .hint { position:absolute; right:12px; top:12px; color:#ddd; font-family:monospace; font-size:13px; background:rgba(0,0,0,0.25); padding:8px; border-radius:6px; z-index: 1000;}
+  </style>
+</head>
+<body>
+  <div class="hint">WASD to move • Collect wood (3) and berries (2) • Light the fire!</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+
+  <!-- REGION:SCENE_CLASS_START -->
+  <script>
+  class CampingScene extends Phaser.Scene {
+    constructor() { super('CampingScene'); }
+    
+    preload() {
+      this.generateTextures();
+    }
+    
+    generateTextures() {
+      // Player texture
+      if (!this.textures.exists('player')) {
+        const g = this.add.graphics();
+        g.fillStyle(0x55aaff, 1);
+        g.fillCircle(16, 16, 14);
+        g.fillStyle(0x2255dd, 1);
+        g.fillCircle(12, 12, 6);
+        g.fillCircle(20, 12, 6);
+        g.generateTexture('player', 32, 32);
+        g.destroy();
+      }
+
+      // Wood texture
+      if (!this.textures.exists('wood')) {
+        const g = this.add.graphics();
+        g.fillStyle(0x8b4513, 1);
+        g.fillRect(0, 0, 20, 12);
+        g.generateTexture('wood', 20, 12);
+        g.destroy();
+      }
+
+      // Berries texture
+      if (!this.textures.exists('berries')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xff3366, 1);
+        g.fillCircle(10, 10, 8);
+        g.generateTexture('berries', 20, 20);
+        g.destroy();
+      }
+
+      // Campfire texture (unlit)
+      if (!this.textures.exists('campfire')) {
+        const g = this.add.graphics();
+        g.fillStyle(0x333333, 1);
+        g.fillCircle(20, 20, 18);
+        g.fillStyle(0x666666, 1);
+        g.fillCircle(20, 20, 12);
+        g.generateTexture('campfire', 40, 40);
+        g.destroy();
+      }
+
+      // Campfire lit texture
+      if (!this.textures.exists('campfireLit')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xff6600, 1);
+        g.fillCircle(20, 20, 18);
+        g.fillStyle(0xffaa00, 1);
+        g.fillCircle(20, 20, 12);
+        g.fillStyle(0xffff00, 1);
+        g.fillCircle(20, 15, 6);
+        g.generateTexture('campfireLit', 40, 40);
+        g.destroy();
+      }
+    }
+    
+    create() {
+      this.gameState = 'PLAYING'; // PLAYING, WON
+      this.inventory = { wood: 0, berries: 0 };
+      this.requiredWood = 3;
+      this.requiredBerries = 2;
+
+      this.createEnvironment();
+      this.createPlayer();
+      this.createCollectibles();
+      this.createCampfire();
+      this.createUI();
+
+      this.keys = this.input.keyboard.addKeys('W,A,S,D');
+
+      this.physics.add.overlap(this.player, this.collectibles, this.collectItem, null, this);
+      this.physics.add.overlap(this.player, this.campfire, this.tryLightFire, null, this);
+    }
+
+    update() {
+      if (this.gameState === 'PLAYING') {
+        this.updatePlayer();
+      }
+    }
+
+    createEnvironment() {
+      // Ground
+      this.add.rectangle(450, 300, 900, 600, 0x1a4d1a);
+
+      // Trees (background decoration)
+      for (let i = 0; i < 25; i++) {
+        const x = Phaser.Math.Between(50, 850);
+        const y = Phaser.Math.Between(50, 550);
+        this.add.circle(x, y, Phaser.Math.Between(6, 12), 0x0d3d0d);
+      }
+
+      // Tent
+      const tentG = this.add.graphics();
+      tentG.fillStyle(0xaa5533, 1);
+      tentG.fillTriangle(700, 500, 750, 420, 800, 500);
+      tentG.fillStyle(0x663333, 1);
+      tentG.fillTriangle(725, 460, 750, 420, 775, 460);
+
+      // Instructions
+      this.add.text(450, 20, 'Collect 3 Wood + 2 Berries to Light the Fire!', {
+        fontFamily: 'monospace',
+        fontSize: 16,
+        color: '#ffff00',
+        align: 'center'
+      }).setOrigin(0.5);
+    }
+
+    createPlayer() {
+      this.player = this.physics.add.sprite(100, 100, 'player');
+      this.player.setCollideWorldBounds(true);
+      this.player.setBounce(0.2);
+      this.player.speed = 200;
+    }
+
+    createCollectibles() {
+      this.collectibles = this.physics.add.group();
+
+      // Spawn 5 wood items
+      for (let i = 0; i < 5; i++) {
+        let x, y;
+        let overlapping = true;
+        
+        // Ensure items don't spawn on top of each other
+        while (overlapping) {
+          x = Phaser.Math.Between(100, 800);
+          y = Phaser.Math.Between(100, 500);
+          overlapping = false;
+          
+          this.collectibles.children.entries.forEach(item => {
+            const dist = Phaser.Math.Distance.Between(x, y, item.x, item.y);
+            if (dist < 80) overlapping = true;
+          });
+        }
+
+        const wood = this.collectibles.create(x, y, 'wood');
+        wood.itemType = 'wood';
+        wood.setTint(0x8b4513);
+      }
+
+      // Spawn 4 berries
+      for (let i = 0; i < 4; i++) {
+        let x, y;
+        let overlapping = true;
+        
+        while (overlapping) {
+          x = Phaser.Math.Between(100, 800);
+          y = Phaser.Math.Between(100, 500);
+          overlapping = false;
+          
+          this.collectibles.children.entries.forEach(item => {
+            const dist = Phaser.Math.Distance.Between(x, y, item.x, item.y);
+            if (dist < 80) overlapping = true;
+          });
+        }
+
+        const berry = this.collectibles.create(x, y, 'berries');
+        berry.itemType = 'berries';
+        berry.setTint(0xff3366);
+      }
+    }
+
+    createCampfire() {
+      this.campfire = this.physics.add.sprite(450, 300, 'campfire');
+      this.campfire.lit = false;
+      this.campfire.setImmovable(true);
+      this.campfireLabel = this.add.text(450, 350, 'Campfire', {
+        fontFamily: 'monospace',
+        fontSize: 14,
+        color: '#888888',
+        align: 'center'
+      }).setOrigin(0.5);
+    }
+
+    updatePlayer() {
+      this.player.setVelocity(0);
+
+      if (this.keys.W.isDown) {
+        this.player.setVelocityY(-this.player.speed);
+      }
+      if (this.keys.S.isDown) {
+        this.player.setVelocityY(this.player.speed);
+      }
+      if (this.keys.A.isDown) {
+        this.player.setVelocityX(-this.player.speed);
+      }
+      if (this.keys.D.isDown) {
+        this.player.setVelocityX(this.player.speed);
+      }
+    }
+
+    collectItem(player, item) {
+      const itemType = item.itemType;
+      this.inventory[itemType]++;
+
+      // Visual feedback
+      this.tweens.add({
+        targets: item,
+        alpha: 0,
+        scale: 1.5,
+        duration: 200,
+        onComplete: () => item.destroy()
+      });
+
+      // Floating text
+      const floatingText = this.add.text(item.x, item.y - 20, '+1 ' + itemType, {
+        fontFamily: 'monospace',
+        fontSize: 16,
+        color: itemType === 'wood' ? '#8b4513' : '#ff3366',
+        fontStyle: 'bold'
+      });
+
+      this.tweens.add({
+        targets: floatingText,
+        y: floatingText.y - 40,
+        alpha: 0,
+        duration: 500,
+        onComplete: () => floatingText.destroy()
+      });
+
+      this.updateUI();
+    }
+
+    tryLightFire(player, fire) {
+      if (this.gameState !== 'PLAYING') return;
+
+      const hasEnough = this.inventory.wood >= this.requiredWood && 
+                        this.inventory.berries >= this.requiredBerries;
+
+      if (!fire.lit && hasEnough) {
+        fire.lit = true;
+        fire.setTexture('campfireLit');
+        this.campfireLabel.setText('🔥 Fire Lit! 🔥');
+        this.campfireLabel.setColor('#ffaa00');
+
+        // Fire animation
+        this.tweens.add({
+          targets: fire,
+          scale: 1.2,
+          duration: 200,
+          yoyo: true,
+          repeat: 2
+        });
+
+        // Particles
+        for (let i = 0; i < 8; i++) {
+          const particle = this.add.circle(
+            fire.x + Phaser.Math.Between(-10, 10),
+            fire.y - 20,
+            3,
+            0xffaa00
+          );
+
+          this.tweens.add({
+            targets: particle,
+            y: particle.y - 50,
+            alpha: 0,
+            duration: 800,
+            onComplete: () => particle.destroy()
+          });
+        }
+
+        this.gameState = 'WON';
+        this.showVictory();
+      }
+    }
+
+    showVictory() {
+      this.add.rectangle(450, 300, 900, 600, 0x000000, 0.8);
+
+      this.add.text(450, 200, 'You Survived!', {
+        fontFamily: 'monospace',
+        fontSize: 48,
+        color: '#ffff00',
+        fontStyle: 'bold',
+        align: 'center'
+      }).setOrigin(0.5);
+
+      this.add.text(450, 280, '🔥 🏕️ 🔥', {
+        fontSize: 48,
+        align: 'center'
+      }).setOrigin(0.5);
+
+      this.add.text(450, 360, `Items Used: ${this.requiredWood} Wood + ${this.requiredBerries} Berries`, {
+        fontFamily: 'monospace',
+        fontSize: 20,
+        color: '#cccccc',
+        align: 'center'
+      }).setOrigin(0.5);
+
+      this.add.text(450, 420, 'Remaining: ' + 
+                            (this.inventory.wood - this.requiredWood) + ' Wood, ' + 
+                            (this.inventory.berries - this.requiredBerries) + ' Berries', {
+        fontFamily: 'monospace',
+        fontSize: 16,
+        color: '#aaaaaa',
+        align: 'center'
+      }).setOrigin(0.5);
+
+      this.add.text(450, 500, 'Click to Play Again', {
+        fontFamily: 'monospace',
+        fontSize: 18,
+        color: '#888888',
+        align: 'center'
+      }).setOrigin(0.5).setInteractive();
+
+      this.input.once('pointerdown', () => this.scene.restart());
+    }
+
+    createUI() {
+      this.woodText = this.add.text(16, 50, 'Wood: 0/' + this.requiredWood, {
+        fontFamily: 'monospace',
+        fontSize: 18,
+        color: '#8b4513',
+        fontStyle: 'bold',
+        backgroundColor: '#000',
+        padding: { x: 8, y: 4 }
+      });
+
+      this.berriesText = this.add.text(16, 85, 'Berries: 0/' + this.requiredBerries, {
+        fontFamily: 'monospace',
+        fontSize: 18,
+        color: '#ff3366',
+        fontStyle: 'bold',
+        backgroundColor: '#000',
+        padding: { x: 8, y: 4 }
+      });
+
+      this.statusText = this.add.text(450, 570, 'Collect items to light the campfire', {
+        fontFamily: 'monospace',
+        fontSize: 14,
+        color: '#cccccc',
+        align: 'center'
+      }).setOrigin(0.5);
+    }
+
+    updateUI() {
+      this.woodText.setText('Wood: ' + this.inventory.wood + '/' + this.requiredWood);
+      this.berriesText.setText('Berries: ' + this.inventory.berries + '/' + this.requiredBerries);
+
+      const woodProgress = Math.min(this.inventory.wood, this.requiredWood);
+      const berryProgress = Math.min(this.inventory.berries, this.requiredBerries);
+      const totalProgress = woodProgress + berryProgress;
+
+      if (totalProgress === this.requiredWood + this.requiredBerries) {
+        this.statusText.setText('Ready to light the fire! Go to the campfire!');
+        this.statusText.setColor('#ffff00');
+      } else {
+        this.statusText.setText(`Need ${this.requiredWood - woodProgress} more wood and ${this.requiredBerries - berryProgress} more berries`);
+      }
+    }
+  }
+  </script>
+  <!-- REGION:SCENE_CLASS_END -->
+
+  <!-- REGION:CONFIG_START -->
+  <script>
+  const config = {
+    type: Phaser.AUTO,
+    width: 900,
+    height: 600,
+    backgroundColor: 0x003300,
+    physics: {
+      default: 'arcade',
+      arcade: {
+        gravity: { y: 0 },
+        debug: false
+      }
+    },
+    scene: [CampingScene]
+  };
+  </script>
+  <!-- REGION:CONFIG_END -->
+
+  <!-- REGION:GAME_INIT_START -->
+  <script>
+  window.onload = () => {
+    const game = new Phaser.Game(config);
+  };
+  </script>
+  <!-- REGION:GAME_INIT_END -->
+
+</body>
+</html>

@@ -1,0 +1,216 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Side-Scroller Platformer - Phaser Template</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    html,body { margin:0; padding:0; background:#102226; height:100%; }
+    .hint { position: absolute; right: 12px; top: 12px; color:#fff; font-family: monospace; font-size:13px; background: rgba(0,0,0,0.25); padding:8px; border-radius:6px;}
+  </style>
+</head>
+<body>
+  <div class="hint">A / D or ← → to move • W / SPACE to jump</div>
+
+  <!-- REGION:CONFIG_START -->
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+  <script>
+  const config = {
+    type: Phaser.AUTO,
+    width: Math.min(1000, window.innerWidth),
+    height: Math.min(600, window.innerHeight),
+    backgroundColor: 0x102226,
+    physics: { default: 'arcade', arcade: { gravity: { y: 900 }, debug: false } },
+    scene: [PlatformScene]
+  };
+  </script>
+  <!-- REGION:CONFIG_END -->
+
+  <!-- REGION:SCENE_CLASS_START -->
+  <script>
+  class PlatformScene extends Phaser.Scene {
+    constructor() { super({ key: 'PlatformScene' }); }
+    preload() {}
+    create() {
+      // ground + platforms
+      this.platforms = this.physics.add.staticGroup();
+      this.createLevel();
+
+      // player
+      this.createPlayer();
+
+      // camera
+      this.cameras.main.setBounds(0, 0, 2000, this.scale.height);
+      this.physics.world.setBounds(0, 0, 2000, this.scale.height);
+      this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
+
+      // inputs
+      this.cursors = this.input.keyboard.createCursorKeys();
+      this.keys = this.input.keyboard.addKeys('A,D,W');
+
+      // enemies
+      this.enemies = this.physics.add.group();
+      this.spawnPatrolEnemy(600, 460);
+      this.spawnPatrolEnemy(1200, 460);
+
+      // collisions
+      this.physics.add.collider(this.player, this.platforms);
+      this.physics.add.collider(this.enemies, this.platforms);
+      this.physics.add.collider(this.player, this.enemies, this.onPlayerHit, null, this);
+
+      // UI
+      this.score = 0;
+      this.createUI();
+    }
+
+    update() {
+      this.updatePlayer();
+      // basic enemy patrol AI
+      this.enemies.children.iterate(e => {
+        if (!e) return;
+        if (e.body.blocked.left) e.setVelocityX(e.speed);
+        if (e.body.blocked.right) e.setVelocityX(-e.speed);
+      });
+    }
+  }
+  </script>
+  <!-- REGION:SCENE_CLASS_END -->
+
+  <!-- REGION:PLAYER_LOGIC_START -->
+  <script>
+  PlatformScene.prototype.createPlayer = function() {
+    // procedural player sprite - capsule with eyes
+    const g = this.add.graphics();
+    g.fillStyle(0xffcc66,1);
+    g.fillRoundedRect(0,0,36,48,12);
+    g.fillStyle(0xffffff,1); g.fillCircle(10,14,4); g.fillCircle(26,14,4);
+    g.fillStyle(0x000000,1); g.fillCircle(10,14,2); g.fillCircle(26,14,2);
+    g.generateTexture('playerPlat', 36, 48); g.destroy();
+
+    this.player = this.physics.add.sprite(100, 300, 'playerPlat');
+    this.player.setBounce(0.05);
+    this.player.setCollideWorldBounds(true);
+    this.player.body.setSize(34,46).setOffset(1,1);
+    this.player.speed = 200;
+    this.player.jumpSpeed = -420;
+    this.player.isJumping = false;
+  };
+
+  PlatformScene.prototype.updatePlayer = function() {
+    const left = this.cursors.left.isDown || this.keys.A.isDown;
+    const right = this.cursors.right.isDown || this.keys.D.isDown;
+    const up = this.cursors.up.isDown || this.keys.W.isDown || this.cursors.space.isDown;
+
+    if (left) this.player.setVelocityX(-this.player.speed);
+    else if (right) this.player.setVelocityX(this.player.speed);
+    else this.player.setVelocityX(0);
+
+    if (up && this.player.body.blocked.down) {
+      this.player.setVelocityY(this.player.jumpSpeed);
+      this.player.isJumping = true;
+    }
+  };
+  </script>
+  <!-- REGION:PLAYER_LOGIC_END -->
+
+  <!-- REGION:ENEMY_LOGIC_START -->
+  <script>
+  PlatformScene.prototype.createLevel = function() {
+    // ground
+    this.platforms.create(500, this.scale.height - 16, null).setScale(100,1).refreshBody();
+    // procedural ground texture
+    if (!this.textures.exists('ground')) {
+      const gg = this.add.graphics(); gg.fillStyle(0x3b2f2f,1); gg.fillRect(0,0,64,16); gg.generateTexture('ground', 64, 16); gg.destroy();
+    }
+    for (let i=0;i<32;i++){
+      const x = i*64;
+      const p = this.add.image(x, this.scale.height-16, 'ground').setOrigin(0,1);
+      this.platforms.add(p);
+      p.refreshBody && p.refreshBody();
+    }
+
+    // floating platforms
+    const platPositions = [[400,460],[800,380],[1100,330],[1500,420]];
+    platPositions.forEach(pos => {
+      const px = this.add.image(pos[0], pos[1], 'ground').setOrigin(0.5,0.5).setScale(2,1);
+      this.platforms.add(px);
+      px.refreshBody && px.refreshBody();
+    });
+  };
+
+  PlatformScene.prototype.spawnPatrolEnemy = function(x,y) {
+    // simple box enemy
+    const g = this.add.graphics();
+    g.fillStyle(0x9ad1ff,1); g.fillRect(0,0,36,28);
+    g.generateTexture('patrol', 36, 28); g.destroy();
+
+    const e = this.enemies.create(x,y,'patrol');
+    e.setBounce(0.1);
+    e.setCollideWorldBounds(true);
+    e.speed = 70;
+    e.setVelocityX(e.speed);
+    e.body.setSize(34,26).setOffset(1,1);
+  };
+  </script>
+  <!-- REGION:ENEMY_LOGIC_END -->
+
+  <!-- REGION:COLLISIONS_START -->
+  <script>
+  PlatformScene.prototype.onPlayerHit = function(player, enemy) {
+    // if player above enemy - stomp
+    if (player.body.velocity.y > 0 && player.body.bottom <= enemy.body.top + 16) {
+      // stomp: destroy enemy and bounce player
+      enemy.destroy();
+      player.setVelocityY(-240);
+      this.score += 20;
+      this.scoreText.setText('Score: ' + this.score);
+      // stomp effect
+      const s = this.add.circle(enemy.x, enemy.y, 26, 0xffee88, 0.8);
+      this.tweens.add({ targets: s, alpha: 0, scale: 1.4, duration: 220, onComplete: ()=> s.destroy() });
+    } else {
+      // take damage and knockback
+      player.setTint(0xff8888);
+      this.time.delayedCall(300, ()=> player.clearTint());
+      // push back
+      const dir = player.x < enemy.x ? -200 : 200;
+      player.setVelocityX(dir);
+    }
+  };
+  </script>
+  <!-- REGION:COLLISIONS_END -->
+
+  <!-- REGION:UI_START -->
+  <script>
+  PlatformScene.prototype.createUI = function() {
+    this.scoreText = this.add.text(16, 16, 'Score: 0', { fontFamily: 'monospace', fontSize: 18, color:'#fff' }).setScrollFactor(0);
+    // goal area far right
+    this.goalX = 1900;
+    this.add.text(this.goalX, 120, 'GOAL', { fontFamily:'monospace', fontSize: 20, color:'#fff' }).setOrigin(0.5).setX(this.goalX).setY(120);
+    // simple win check
+    this.time.addEvent({ delay: 200, callback: ()=> {
+      if (this.player.x >= this.goalX) this.onWin();
+    }, loop: true });
+  };
+
+  PlatformScene.prototype.onWin = function() {
+    this.physics.pause();
+    this.add.text(this.cameras.main.scrollX + this.scale.width/2, 180, 'You Win!', { fontFamily:'monospace', fontSize:40, color:'#fff' }).setOrigin(0.5);
+    this.add.text(this.cameras.main.scrollX + this.scale.width/2, 240, 'Click to Restart', { fontFamily:'monospace', fontSize:16, color:'#ddd' }).setOrigin(0.5);
+    this.input.once('pointerdown', ()=> this.scene.restart());
+  };
+  </script>
+  <!-- REGION:UI_END -->
+
+  <!-- REGION:RESTART_LOGIC_START -->
+  <script>
+  window.onload = () => {
+    const game = new Phaser.Game(config);
+    window.addEventListener('resize', ()=> {
+      game.scale.resize(Math.min(1000, window.innerWidth), Math.min(600, window.innerHeight));
+    });
+  };
+  </script>
+  <!-- REGION:RESTART_LOGIC_END -->
+</body>
+</html>

@@ -1,0 +1,400 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Sports / Ball Game - Phaser Template</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html,body { margin:0; padding:0; background:#0b6623; height:100%; }
+    .hint { position:absolute; right:12px; top:12px; color:#ddd; font-family:monospace; font-size:13px; background:rgba(0,0,0,0.25); padding:8px; border-radius:6px; z-index: 1000;}
+  </style>
+</head>
+<body>
+  <div class="hint">WASD to move • Push the ball into the RIGHT goal!</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+
+  <!-- REGION:SCENE_CLASS_START -->
+  <script>
+  class SportsScene extends Phaser.Scene {
+    constructor() { super('SportsScene'); }
+    
+    preload() {
+      this.generateTextures();
+    }
+    
+    generateTextures() {
+      // Player texture
+      if (!this.textures.exists('player')) {
+        const g = this.add.graphics();
+        g.fillStyle(0x55aaff, 1);
+        g.fillCircle(20, 20, 18);
+        g.fillStyle(0x2255dd, 1);
+        g.fillCircle(20, 20, 10);
+        g.generateTexture('player', 40, 40);
+        g.destroy();
+      }
+
+      // AI player texture
+      if (!this.textures.exists('ai')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xff5555, 1);
+        g.fillCircle(20, 20, 18);
+        g.fillStyle(0xdd2222, 1);
+        g.fillCircle(20, 20, 10);
+        g.generateTexture('ai', 40, 40);
+        g.destroy();
+      }
+
+      // Ball texture
+      if (!this.textures.exists('ball')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xffffff, 1);
+        g.fillCircle(15, 15, 14);
+        g.fillStyle(0xffff00, 1);
+        g.fillCircle(15, 15, 8);
+        g.generateTexture('ball', 30, 30);
+        g.destroy();
+      }
+    }
+    
+    create() {
+      this.score = { player: 0, ai: 0 };
+      this.gameTime = 300; // 5 minutes in seconds
+      this.gameActive = true;
+
+      this.createField();
+      this.createPlayer();
+      this.createAI();
+      this.createBall();
+      this.createGoals();
+      this.createUI();
+
+      this.keys = this.input.keyboard.addKeys('W,A,S,D');
+
+      // Collisions
+      this.physics.add.collider(this.player, this.ball);
+      this.physics.add.collider(this.ai, this.ball);
+      this.physics.add.overlap(this.ball, this.goalLeft, this.goalScored, null, this);
+      this.physics.add.overlap(this.ball, this.goalRight, this.goalScored, null, this);
+
+      // Timer
+      this.time.addEvent({
+        delay: 1000,
+        loop: true,
+        callback: () => {
+          if (this.gameActive && this.gameTime > 0) {
+            this.gameTime--;
+            this.updateTimer();
+            if (this.gameTime <= 0) {
+              this.endGame();
+            }
+          }
+        }
+      });
+    }
+
+    update() {
+      if (!this.gameActive) return;
+
+      this.updatePlayer();
+      this.updateAI();
+      
+      // Keep ball in bounds
+      if (this.ball.x < 20) this.ball.x = 20;
+      if (this.ball.x > this.scale.width - 20) this.ball.x = this.scale.width - 20;
+      if (this.ball.y < 20) this.ball.y = 20;
+      if (this.ball.y > this.scale.height - 20) this.ball.y = this.scale.height - 20;
+
+      // Apply friction
+      this.ball.setVelocity(
+        this.ball.body.velocity.x * 0.98,
+        this.ball.body.velocity.y * 0.98
+      );
+    }
+
+    createField() {
+      // Field background
+      this.add.rectangle(
+        this.scale.width / 2,
+        this.scale.height / 2,
+        this.scale.width - 40,
+        this.scale.height - 40,
+        0x0a5520
+      ).setStrokeStyle(4, 0xffffff);
+
+      // Center line
+      this.add.line(
+        this.scale.width / 2,
+        20,
+        this.scale.width / 2,
+        this.scale.height - 20,
+        0xffffff
+      ).setLineWidth(2);
+
+      // Center circle
+      this.add.circle(
+        this.scale.width / 2,
+        this.scale.height / 2,
+        60,
+        0x0a5520
+      ).setStrokeStyle(2, 0xffffff);
+
+      // Center spot
+      this.add.circle(
+        this.scale.width / 2,
+        this.scale.height / 2,
+        4,
+        0xffffff
+      );
+    }
+
+    createPlayer() {
+      this.player = this.physics.add.sprite(150, this.scale.height / 2, 'player');
+      this.player.setCollideWorldBounds(true);
+      this.player.setBounce(0.5);
+      this.player.speed = 280;
+    }
+
+    createAI() {
+      this.ai = this.physics.add.sprite(this.scale.width - 150, this.scale.height / 2, 'ai');
+      this.ai.setCollideWorldBounds(true);
+      this.ai.setBounce(0.5);
+      this.ai.speed = 200;
+      this.ai.reaction = 0;
+    }
+
+    createBall() {
+      this.ball = this.physics.add.sprite(this.scale.width / 2, this.scale.height / 2, 'ball');
+      this.ball.setBounce(0.9, 0.9);
+      this.ball.setCollideWorldBounds(true);
+      this.ball.setDrag(0.99);
+    }
+
+    createGoals() {
+      // Left goal (AI scores here)
+      this.goalLeft = this.add.zone(20, this.scale.height / 2, 40, 160);
+      this.physics.world.enable(this.goalLeft);
+      this.goalLeft.body.setAllowGravity(false);
+      this.goalLeft.isLeft = true;
+
+      // Right goal (Player scores here)
+      this.goalRight = this.add.zone(this.scale.width - 20, this.scale.height / 2, 40, 160);
+      this.physics.world.enable(this.goalRight);
+      this.goalRight.body.setAllowGravity(false);
+      this.goalRight.isLeft = false;
+
+      // Goal posts
+      this.add.rectangle(30, this.scale.height / 2 - 80, 20, 20, 0xcccccc);
+      this.add.rectangle(30, this.scale.height / 2 + 80, 20, 20, 0xcccccc);
+      this.add.rectangle(this.scale.width - 30, this.scale.height / 2 - 80, 20, 20, 0xcccccc);
+      this.add.rectangle(this.scale.width - 30, this.scale.height / 2 + 80, 20, 20, 0xcccccc);
+    }
+
+    updatePlayer() {
+      this.player.body.setVelocity(0);
+
+      if (this.keys.W.isDown) {
+        this.player.body.setVelocityY(-this.player.speed);
+      }
+      if (this.keys.S.isDown) {
+        this.player.body.setVelocityY(this.player.speed);
+      }
+      if (this.keys.A.isDown) {
+        this.player.body.setVelocityX(-this.player.speed);
+      }
+      if (this.keys.D.isDown) {
+        this.player.body.setVelocityX(this.player.speed);
+      }
+    }
+
+    updateAI() {
+      this.ai.reaction++;
+
+      // AI decides every 20 frames
+      if (this.ai.reaction > 20) {
+        this.ai.reaction = 0;
+
+        const dx = this.ball.x - this.ai.x;
+        const dy = this.ball.y - this.ai.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        // Chase ball when close
+        if (dist < 200) {
+          this.ai.body.setVelocity(
+            Math.sign(dx) * this.ai.speed * 0.8,
+            Math.sign(dy) * this.ai.speed * 0.8
+          );
+        } else {
+          // Return to center
+          const centerY = this.scale.height / 2;
+          this.ai.body.setVelocity(
+            0,
+            Math.sign(centerY - this.ai.y) * this.ai.speed * 0.5
+          );
+        }
+      }
+
+      // Keep in bounds
+      if (this.ai.y < 50) this.ai.y = 50;
+      if (this.ai.y > this.scale.height - 50) this.ai.y = this.scale.height - 50;
+    }
+
+    goalScored(ball, goal) {
+      if (goal.isLeft) {
+        // AI scored
+        this.score.ai++;
+        this.updateScore();
+      } else {
+        // Player scored
+        this.score.player++;
+        this.updateScore();
+      }
+
+      // Reset positions
+      this.ball.setPosition(this.scale.width / 2, this.scale.height / 2);
+      this.ball.setVelocity(0, 0);
+      this.player.setPosition(150, this.scale.height / 2);
+      this.ai.setPosition(this.scale.width - 150, this.scale.height / 2);
+
+      // Visual effect
+      const goal_circle = this.add.circle(goal.x, goal.y, 40, 0xffff00, 0.6);
+      this.tweens.add({
+        targets: goal_circle,
+        alpha: 0,
+        scale: 2,
+        duration: 400,
+        onComplete: () => goal_circle.destroy()
+      });
+    }
+
+    updateScore() {
+      this.scoreText.setText(
+        `Player: ${this.score.player}  vs  AI: ${this.score.ai}`
+      );
+    }
+
+    updateTimer() {
+      const minutes = Math.floor(this.gameTime / 60);
+      const seconds = this.gameTime % 60;
+      this.timerText.setText(
+        `Time: ${minutes}:${seconds.toString().padStart(2, '0')}`
+      );
+    }
+
+    createUI() {
+      this.scoreText = this.add.text(
+        this.scale.width / 2,
+        20,
+        'Player: 0  vs  AI: 0',
+        {
+          fontFamily: 'monospace',
+          fontSize: 24,
+          color: '#fff',
+          fontStyle: 'bold'
+        }
+      ).setOrigin(0.5, 0);
+
+      this.timerText = this.add.text(
+        this.scale.width / 2,
+        60,
+        'Time: 5:00',
+        {
+          fontFamily: 'monospace',
+          fontSize: 20,
+          color: '#ffff00'
+        }
+      ).setOrigin(0.5, 0);
+    }
+
+    endGame() {
+      this.gameActive = false;
+      this.physics.pause();
+
+      const winner = this.score.player > this.score.ai
+        ? 'You Win!'
+        : this.score.player < this.score.ai
+        ? 'AI Wins!'
+        : 'Tie!';
+
+      const color = this.score.player > this.score.ai ? '#00ff00' : '#ff0000';
+
+      this.add.rectangle(
+        this.scale.width / 2,
+        this.scale.height / 2,
+        900,
+        600,
+        0x000000,
+        0.8
+      );
+
+      this.add.text(
+        this.scale.width / 2,
+        this.scale.height / 2 - 80,
+        winner,
+        {
+          fontFamily: 'monospace',
+          fontSize: 56,
+          color: color,
+          fontStyle: 'bold'
+        }
+      ).setOrigin(0.5);
+
+      this.add.text(
+        this.scale.width / 2,
+        this.scale.height / 2 + 20,
+        `Final Score: ${this.score.player} - ${this.score.ai}`,
+        {
+          fontFamily: 'monospace',
+          fontSize: 28,
+          color: '#fff'
+        }
+      ).setOrigin(0.5);
+
+      this.add.text(
+        this.scale.width / 2,
+        this.scale.height / 2 + 80,
+        'Click to Restart',
+        {
+          fontFamily: 'monospace',
+          fontSize: 18,
+          color: '#aaa'
+        }
+      ).setOrigin(0.5);
+
+      this.input.once('pointerdown', () => this.scene.restart());
+    }
+  }
+  </script>
+  <!-- REGION:SCENE_CLASS_END -->
+
+  <!-- REGION:CONFIG_START -->
+  <script>
+  const config = {
+    type: Phaser.AUTO,
+    width: 900,
+    height: 600,
+    backgroundColor: 0x0b6623,
+    physics: {
+      default: 'arcade',
+      arcade: {
+        gravity: { y: 0 },
+        debug: false
+      }
+    },
+    scene: [SportsScene]
+  };
+  </script>
+  <!-- REGION:CONFIG_END -->
+
+  <!-- REGION:GAME_INIT_START -->
+  <script>
+  window.onload = () => {
+    const game = new Phaser.Game(config);
+  };
+  </script>
+  <!-- REGION:GAME_INIT_END -->
+
+</body>
+</html>

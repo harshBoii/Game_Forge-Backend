@@ -1,811 +1,427 @@
-
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="utf-8" />
-  <title>Untitled Neon Racer - Phaser 3</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Phaser 3 library (external, but it's the game engine; no image assets used) -->
-  <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.js"></script>
+  <meta charset="utf-8">
+  <title>Camping Adventure - Phaser Game</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    html, body {
-      margin: 0;
-      height: 100%;
-      background: #000;
-      color: #d9f8ff;
-      font-family: monospace;
-      user-select: none;
-    }
-    #phaser-game {
-      width: 1024px;
-      height: 1024px;
-      max-width: 90vw;
-      margin: 0 auto;
-      display: block;
-      position: relative;
-      top: 50%;
-      transform: translateY(-50%);
-    }
-    /* Neon UI style hints */
-    .neon {
-      text-shadow: 0 0 6px #00f5ff, 0 0 14px #00f5ff;
-      color: #eaffff;
-    }
+    html,body { margin:0; padding:0; background:#021; height:100%; }
+    .hint { position:absolute; right:12px; top:12px; color:#ddd; font-family:monospace; font-size:13px; background:rgba(0,0,0,0.25); padding:8px; border-radius:6px; z-index: 1000;}
   </style>
 </head>
 <body>
-  <div id="phaser-game"></div>
+  <div class="hint">WASD to move • Collect stones (4) & wood (3) • Build fire pit & pitch tent</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+
   <script>
-/*
-  Neon Gravity Neon Track - Phaser 3
-  Self-contained, procedural shapes, no external assets (textures generated at runtime).
-  Player + Rival, gravity wells, boost pads, pit stops, obstacles, finish line, neon UI.
-*/
-
-class NeonRacerScene extends Phaser.Scene {
-  constructor() {
-    super({ key: 'NeonRacerScene' });
-  }
-
-  preload() {
-    // No external assets; we'll generate textures procedurially.
-  }
-
-  create() {
-    // Track and environment data (as provided)
-    this.track = {
-      laps_required: 3,
-      gravity_fields: [
-        { x: 210, y: 260, radius: 120, strength: 1.6 },
-        { x: 640, y: 720, radius: 150, strength: -1.4 }
-      ],
-      boost_pads: [
-        { x: 180, y: 210, radius: 22, impulse: 2.4, duration: 1.5 },
-        { x: 860, y: 420, radius: 26, impulse: 2.6, duration: 1.0 }
-      ],
-      pit_stops: [
-        { x: 360, y: 520, radius: 28 }
-      ],
-      obstacles: [
-        { x: 520, y: 320, type: "spike", radius: 10 },
-        { x: 700, y: 540, type: "cone", radius: 12 }
-      ],
-      finish_line: { x: 970, y: 30, width: 160 },
-      time_limit_seconds: 60
-    };
-
-    // World camera setup
-    this.cameras.main.setBackgroundColor('#0a0a0a');
-    this.cameras.main.setBounds(0, 0, 1024, 1024);
-
-    // Neon grid background (parallax layer)
-    this.createNeonGridBackground();
-
-    // Create procedural textures for cars, obstacles, finish line
-    this.createProceduralTextures();
-
-    // Create track visuals
-    this.createTrackElements();
-
-    // Create visible track outline
-    this.createTrackOutline();
-
-    // Create player
-    this.createPlayer();
-
-    // Create rival(s)
-    this.createRival();
-
-    // Input
-    this.cursors = this.input.keyboard.createCursorKeys();
-    this.keyW = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W);
-    this.keyA = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A);
-    this.keyS = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S);
-    this.keyD = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D);
-    this.keySpace = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
-    this.keyP = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.P);
-    this.keyR = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);
-
-    // UI
-    this.initUI();
-
-    // World state
-    this.isPaused = false;
-    this.gameOver = false;
-    this.startTime = this.time.now;
-    this.globalStartTime = this.time.now; // global time limit timer
-
-    // Keep track of laps
-    this.player.lap = 0;
-    this.player.hasFinished = false;
-    this.bestLapTime = null;
-    this.lastLapStart = this.time.now;
-
-    // For drift/boost mechanic
-    this.MAX_DRIFT = 100;
-    this.player.driftMeter = 0;
-    this.player.boostActive = false;
-    this.player.boostTimer = 0;
-
-    // Track finish crossing helper (gate)
-    this.finishCrossedThisLap = false;
-
-    // Simple physics tuning
-    this.physics.world.setBounds(0, 0, 1024, 1024);
-
-    // Parallax for vibe: a few neon billboards (static)
-    this.createBackgroundBillboards();
-
-    // Start camera follow
-    this.cameras.main.startFollow(this.player.sprite, true, 0.08, 0.08);
-
-    // Rival overlap handling
-    this.playerRivalOverlapCooldown = 0;
-    // Add overlap detection between player and rival
-    this.physics.add.overlap(this.player.sprite, this.rival.sprite, this.handlePlayerRivalOverlap, null, this);
-  }
-
-  createNeonGridBackground() {
-    // Create a large grid texture procedurially
-    const gridSize = 1024;
-    const g = this.add.graphics({ x: 0, y: 0 });
-    g.lineStyle(1, 0x00f5ff, 0.25);
-    for (let x = 0; x <= gridSize; x += 40) {
-      g.moveTo(x, 0);
-      g.lineTo(x, gridSize);
+  class CampingScene extends Phaser.Scene {
+    constructor() { super('CampingScene'); }
+    
+    preload() {
+      this.generatePixelArtTextures();
     }
-    for (let y = 0; y <= gridSize; y += 40) {
-      g.moveTo(0, y);
-      g.lineTo(gridSize, y);
+    
+    generatePixelArtTextures() {
+        const createTexture = (name, width, height, drawCallback) => {
+            if (this.textures.exists(name)) return;
+            const g = this.add.graphics();
+            drawCallback(g);
+            g.generateTexture(name, width, height);
+            g.destroy();
+        };
+
+        // Player
+        createTexture('player', 16, 24, g => {
+            g.fillStyle(0x4a4a4a);
+            g.fillRect(0, 0, 16, 18);
+            g.fillStyle(0x1e50a0);
+            g.fillRect(0, 18, 16, 6);
+            g.fillStyle(0xffcc99);
+            g.fillRect(4, 2, 8, 8);
+        });
+
+        // Wood
+        createTexture('wood', 20, 8, g => {
+            g.fillStyle(0x8b4513);
+            g.fillRect(0, 0, 20, 8);
+            g.fillStyle(0x654321);
+            g.fillRect(0, 0, 20, 2);
+        });
+
+        // Stone
+        createTexture('stone', 12, 12, g => {
+            g.fillStyle(0x808080);
+            g.fillRect(0, 0, 12, 12);
+            g.fillStyle(0x696969);
+            g.fillRect(2, 2, 8, 8);
+        });
+        
+        // Campfire States
+        createTexture('campfire_empty', 48, 48, g => {
+            const stones = [[16, 4], [32, 10], [36, 24], [24, 36], [10, 32], [4, 16]];
+            g.fillStyle(0x808080);
+            stones.forEach(s => g.fillRect(s[0], s[1], 12, 12));
+        });
+
+        createTexture('campfire_pit', 48, 48, g => {
+            const stones = [[16, 4], [32, 10], [36, 24], [24, 36], [10, 32], [4, 16]];
+            g.fillStyle(0x808080);
+            stones.forEach(s => g.fillRect(s[0], s[1], 12, 12));
+        });
+
+        createTexture('campfire_wood', 48, 48, g => {
+            const stones = [[16, 4], [32, 10], [36, 24], [24, 36], [10, 32], [4, 16]];
+            g.fillStyle(0x808080);
+            stones.forEach(s => g.fillRect(s[0], s[1], 12, 12));
+            g.fillStyle(0x8b4513);
+            g.fillRect(18, 18, 18, 6);
+            g.fillRect(20, 24, 6, 10);
+        });
+
+        createTexture('campfire_lit', 48, 48, g => {
+            const stones = [[16, 4], [32, 10], [36, 24], [24, 36], [10, 32], [4, 16]];
+            g.fillStyle(0x808080);
+            stones.forEach(s => g.fillRect(s[0], s[1], 12, 12));
+            g.fillStyle(0xff6600);
+            g.fillRect(18, 16, 12, 12);
+            g.fillStyle(0xffaa00);
+            g.fillRect(20, 12, 8, 8);
+            g.fillStyle(0xffff00);
+            g.fillRect(22, 10, 4, 4);
+        });
+
+        // Tent States
+        createTexture('tent_materials', 64, 32, g => {
+            g.fillStyle(0x8b4513);
+            g.fillRect(0, 24, 64, 8);
+            g.fillStyle(0x006400);
+            g.fillRect(10, 0, 20, 24);
+        });
+
+        createTexture('tent_pitched', 64, 48, g => {
+            g.fillStyle(0x008000);
+            g.fillTriangle(0, 48, 32, 0, 64, 48);
+            g.fillStyle(0x006400);
+            g.fillTriangle(24, 48, 32, 16, 40, 48);
+        });
     }
-    g.strokePath();
-    g.generateTexture('grid', gridSize, gridSize);
-    g.destroy();
-
-    // Tile background to simulate infinite neon floor
-    this.gridBG = this.add.tileSprite(0, 0, 1024, 1024, 'grid').setOrigin(0);
-    this.gridBG.setDepth(-1);
-  }
-
-  createProceduralTextures() {
-    // Car body textures with eyes/hands
-    this.createCarTexture('playerCar', 48, 24, 0x00ffd0, 0xff3aff, 0x1b1b1b, true);
-    this.createCarTexture('rivalCar', 48, 24, 0xff4d4d, 0xffd166, 0x1b1b1b, false);
-
-    // Obstacle shapes textures
-    this.createSpikeTexture('spike');
-    this.createConeTexture('cone');
-
-    // Finish line texture (neon border)
-    this.createFinishTexture('finishLine');
-  }
-
-  createCarTexture(key, w, h, bodyCol, stripeCol, eyeBack, withEyes) {
-    const g = this.add.graphics({ x: 0, y: 0 });
-    g.fillStyle(bodyCol, 1);
-    g.fillRoundedRect(0, 0, w, h, 6);
-
-    // Center stripe
-    g.fillStyle(stripeCol, 1);
-    g.fillRect(2, h/2 - 3, w - 4, 6);
-
-    // Eyes (front-facing)
-    if (withEyes) {
-      g.fillStyle(0xffffff, 1);
-      g.fillCircle(w * 0.28, h * 0.45, 3);
-      g.fillCircle(w * 0.72, h * 0.45, 3);
-      // Pupils
-      g.fillStyle(0x000000, 1);
-      g.fillCircle(w * 0.28, h * 0.45, 1);
-      g.fillCircle(w * 0.72, h * 0.45, 1);
-    }
-
-    // Hands (tiny protrusions)
-    g.fillStyle(0x00ffd0, 1);
-    g.fillRect(-2, h * 0.25, 4, 6);
-    g.fillRect(w - 2, h * 0.25, 4, 6);
-
-    // Glow outline
-    g.lineStyle(2, 0xffffff, 0.25);
-    g.strokeRoundedRect(0, 0, w, h, 6);
-
-    g.generateTexture(key, w, h);
-    g.destroy();
-  }
-
-  createSpikeTexture(key) {
-    const w = 22, h = 22;
-    const g = this.add.graphics({ x: 0, y: 0 });
-    g.fillStyle(0xff2a2a, 1);
-    // triangle spike pointing up
-    g.beginPath();
-    g.moveTo(w/2, 0);
-    g.lineTo(0, h);
-    g.lineTo(w, h);
-    g.closePath();
-    g.fillPath();
-    // highlight
-    g.fillStyle(0xffffff, 0.3);
-    g.fillRect(6, 4, 4, 6);
-    g.generateTexture(key, w, h);
-    g.destroy();
-  }
-
-  createConeTexture(key) {
-    const w = 26, h = 26;
-    const g = this.add.graphics({ x: 0, y: 0 });
-    g.fillStyle(0xffa500, 1);
-    g.beginPath();
-    g.moveTo(w/2, 0);
-    g.lineTo(0, h);
-    g.lineTo(w, h);
-    g.closePath();
-    g.fillPath();
-    g.generateTexture(key, w, h);
-    g.destroy();
-  }
-
-  createFinishTexture(key) {
-    const w = 48, h = 18;
-    const g = this.add.graphics({ x: 0, y: 0 });
-    // Neon border
-    g.fillStyle(0x001a1a, 0.6);
-    g.fillRect(0, 0, w, h);
-    g.lineStyle(2, 0x00f5ff, 0.9);
-    g.strokeRect(1, 1, w-2, h-2);
-    // white stripes
-    g.lineStyle(3, 0xffffff, 0.9);
-    g.beginPath();
-    g.moveTo(2, h/2);
-    g.lineTo(w-2, h/2);
-    g.strokePath();
-    g.generateTexture(key, w, h);
-    g.destroy();
-  }
-
-  createTrackElements() {
-    // Visuals for boost pads
-    this.boostPads = this.track.boost_pads.map(p => ({
-      x: p.x, y: p.y, radius: p.radius, impulse: p.impulse, duration: p.duration
-    }));
-
-    // Gravity wells (display only)
-    this.gravityFields = this.track.gravity_fields.map(g => ({
-      x: g.x, y: g.y, radius: g.radius, strength: g.strength
-    }));
-
-    // Pit stops
-    this.pitStops = this.track.pit_stops.map(p => ({ x: p.x, y: p.y, radius: p.radius, progress: 0 }));
-
-    // Obstacles
-    this.obstacles = this.track.obstacles.map(o => ({
-      x: o.x, y: o.y, type: o.type, radius: o.radius
-    }));
-
-    // Finish line
-    const f = this.track.finish_line;
-    this.finishLine = { x: f.x, y: f.y, width: f.width };
-
-    // Create a finish zone rectangle for robust detection
-    this.finishZoneRect = new Phaser.Geom.Rectangle(
-      this.finishLine.x - this.finishLine.width / 2,
-      this.finishLine.y - 8,
-      this.finishLine.width,
-      16
-    );
-
-    // Draw visual elements for pads, pits, obstacles
-    // Boost pads glow
-    this.boostGraphics = this.add.group();
-    for (let b of this.boostPads) {
-      const texKey = 'boost' + b.x + '_' + b.y;
-      if (!this.textures.exists(texKey)) {
-        const g = this.add.graphics({ x: 0, y: 0 });
-        g.fillStyle(0x00ffff, 0.25);
-        g.fillCircle(b.x, b.y, b.radius * 1.2);
-        g.fillStyle(0xffffff, 0.5);
-        g.fillCircle(b.x, b.y, b.radius);
-        g.generateTexture(texKey, b.radius * 2, b.radius * 2);
-        g.destroy();
-      }
-      // show as glow sprite
-      const glow = this.add.image(b.x, b.y, texKey);
-      glow.setBlendMode(Phaser.BlendModes.ADD);
-      glow.setAlpha(0.5);
-      this.boostGraphics.add(glow);
-    }
-
-    // Obstacles visuals
-    this.obstacleGraphics = this.add.group();
-    for (let o of this.obstacles) {
-      const tex = o.type === 'spike' ? 'spike' : 'cone';
-      const sprite = this.add.image(o.x, o.y, tex);
-      sprite.setOrigin(0.5);
-      sprite.setScale(1.0);
-      sprite.setDepth(1);
-      this.obstacleGraphics.add(sprite);
-    }
-
-    // Finish line visuals
-    this.finishLineViz = this.add.rectangle(this.finishLine.x, this.finishLine.y, this.finishLine.width, 8, 0xffffff, 0.9);
-    this.finishLineViz.setOrigin(0.5, 0.5);
-    this.finishLineViz.setStrokeStyle(2, 0x00ffff);
-  }
-
-  createTrackOutline() {
-    // Visible track outline for better visibility
-    const pad = 60;
-    const g = this.add.graphics({ x: 0, y: 0 });
-    g.setDepth(1);
-    // Outer neon border
-    g.lineStyle(3, 0x00ffff, 0.95);
-    g.strokeRoundedRect(pad, pad, 1024 - pad * 2, 1024 - pad * 2, 20);
-    // Inner track boundary
-    g.lineStyle(2, 0x00ffff, 0.45);
-    g.strokeRoundedRect(pad + 8, pad + 8, 1024 - pad * 2 - 16, 1024 - pad * 2 - 16, 16);
-    // Center dashed line
-    g.lineStyle(2, 0xffffff, 0.6);
-    const centerY = pad + (1024 - pad * 2) / 2;
-    for (let x = pad + 12; x <= 1024 - pad - 12; x += 20) {
-      g.beginPath();
-      g.moveTo(x, centerY);
-      g.lineTo(Math.min(x + 10, 1024 - pad - 12), centerY);
-      g.strokePath();
-    }
-  }
-
-  createPlayer() {
-    // Player car at start
-    const startX = 120;
-    const startY = 940;
-    this.player = {
-      sprite: this.physics.add.image(startX, startY, 'playerCar'),
-      velocity: new Phaser.Math.Vector2(0, 0),
-      speed: 0,
-      maxSpeed: 260,
-      acceleration: 6.0,
-      brake: 8.0,
-      friction: 0.95,
-      angle: 0,
-      boostActive: false,
-      boostTimer: 0,
-      driftMeter: 0,
-      lap: 0,
-      lapTimes: [],
-      checkpointIndex: 0,
-      shield: 100,
-      collisionCooldown: 0
-    };
-    this.player.sprite.setOrigin(0.5, 0.5);
-    this.player.sprite.setDepth(2);
-    // Use body-based physics for proper max velocity and damping
-    // Replace deprecated setDamping with drag and angular drag
-    this.player.sprite.body.setDrag(50);
-    this.player.sprite.body.setAngularDrag(200);
-    this.player.sprite.body.setMaxVelocity(400);
-    // Optional alignment
-    // Note: setMaxVelocity on body replaces setMaxVelocity on sprite
-    this.player.sprite.setCollideWorldBounds(true);
-  }
-
-  createRival() {
-    // One AI rival
-    const rivalNode = this.physics.add.image(200, 860, 'rivalCar');
-    rivalNode.setOrigin(0.5, 0.5);
-    rivalNode.setDepth(2);
-    rivalNode.setAngle(0);
-    rivalNode.setScale(1.0);
-
-    this.rival = {
-      sprite: rivalNode,
-      speed: 0,
-      maxSpeed: 240,
-      aiState: 'racing',
-      pathIndex: 0,
-      driftMeter: 0
-    };
-
-    // Waypoints around track
-    this.rival.waypoints = [
-      { x: 100, y: 100 },
-      { x: 900, y: 100 },
-      { x: 900, y: 900 },
-      { x: 100, y: 900 }
-    ];
-  }
-
-  initUI() {
-    // HUD
-    this.speedText = this.add.text(760, 20, 'Speed: 0', { font: '14px monospace', fill: '#00ffff' }).setScrollFactor(0);
-    this.lapText = this.add.text(512, 10, 'Lap: 0/3', { font: '16px monospace', fill: '#00ffff' }).setOrigin(0.5, 0).setScrollFactor(0);
-    this.bestLapText = this.add.text(512, 30, 'Best: --', { font: '14px monospace', fill: '#00ffff' }).setOrigin(0.5, 0).setScrollFactor(0);
-    this.timeText = this.add.text(860, 40, 'Time: 0', { font: '14px monospace', fill: '#00ffff' }).setScrollFactor(0);
-    this.boostMeterText = this.add.text(20, 900, 'Boost: 0%', { font: '14px monospace', fill: '#00ffff' }).setScrollFactor(0);
-
-    // Pause / restart hint
-    this.pauseText = this.add.text(512, 512, '', { font: '20px monospace', fill: '#fff' }).setOrigin(0.5).setScrollFactor(0);
-  }
-
-  createBackgroundBillboards() {
-    // Tiny parallax billboards for vibe
-    this.billboards = [];
-    const positions = [
-      { x: 160, y: 160 },
-      { x: 860, y: 240 },
-      { x: 250, y: 760 },
-      { x: 800, y: 860 }
-    ];
-    for (let p of positions) {
-      const line = this.add.rectangle(p.x, p.y, 40, 60, 0xff00ff, 0.15);
-      line.setStrokeStyle(2, 0xffffff, 0.2);
-      line.setOrigin(0.5);
-      this.billboards.push(line);
-    }
-  }
-
-  updateNeonBillboards() {
-    // simple subtle bob effect
-    const t = this.time.now * 0.002;
-    for (let i = 0; i < this.billboards.length; i++) {
-      const bob = Math.sin(t + i) * 6;
-      this.billboards[i].y += bob * 0.0; // keep static for stability
-    }
-  }
-
-  updateUI() {
-    const spd = Math.max(0, Math.hypot(this.player.sprite.body.velocity.x, this.player.sprite.body.velocity.y) | 0);
-    this.speedText.setText('Speed: ' + spd);
-    this.lapText.setText(`Lap: ${this.player.lap}/${this.track.laps_required}`);
-    if (this.bestLapTime != null) {
-      this.bestLapText.setText('Best: ' + this.bestLapTime.toFixed(2) + 's');
-    } else {
-      this.bestLapText.setText('Best: --');
-    }
-    const now = (this.time.now - this.globalStartTime) / 1000;
-    this.timeText.setText('Time: ' + now.toFixed(1) + 's');
-    this.boostMeterText.setText('Boost: ' + Math.floor(this.player.driftMeter) + '%');
-  }
-
-  resetTrack() {
-    // Reset to start positions and clear states
-    this.player.sprite.setPosition(120, 940);
-    this.player.sprite.setAngle(0);
-    this.player.velocity.set(0, 0);
-    this.player.speed = 0;
-    this.player.boostActive = false;
-    this.player.boostTimer = 0;
-    this.player.driftMeter = 0;
-    this.player.lap = 0;
-    this.player.lapTimes = [];
-    this.player.checkpointIndex = 0;
-    this.finishCrossedThisLap = false;
-    this.startTime = this.time.now;
-    this.globalStartTime = this.time.now;
-    this.gameOver = false;
-    this.isPaused = false;
-    this.pauseText.setText('');
-    this.bestLapTime = null; // reset best lap on restart
-  }
-
-  gameOverScreen(win) {
-    this.gameOver = true;
-    const msg = win ? 'YOU WIN! Press R to restart' : 'CRASH! Press R to retry';
-    this.pauseText.setText(msg);
-  }
-
-  update(time, delta) {
-    // Pause toggle
-    if (Phaser.Input.Keyboard.JustDown(this.keyP)) {
-      this.isPaused = !this.isPaused;
-      if (this.isPaused) {
-        this.physics.world.pause();
-        this.pauseText.setText('PAUSED');
-      } else {
-        this.physics.world.resume();
-        this.pauseText.setText('');
-      }
-    }
-
-    // Restart
-    if (Phaser.Input.Keyboard.JustDown(this.keyR)) {
-      this.resetTrack();
-      this.pauseText.setText('');
-      return;
-    }
-
-    // Enforce global time limit
-    const globalElapsedSec = (this.time.now - this.globalStartTime) / 1000;
-    if (globalElapsedSec > this.track.time_limit_seconds && !this.gameOver) {
-      this.gameOverScreen(false);
-    }
-
-    if (this.isPaused || this.gameOver) {
-      this.updateUI();
-      this.updateNeonBillboards();
-      // Update parallax slightly to keep illusion alive while paused
-      const cam = this.cameras.main;
-      this.gridBG.tilePositionX = cam.scrollX * 0.95;
-      this.gridBG.tilePositionY = cam.scrollY * 0.95;
-      return;
-    }
-
-    // Player input
-    const onForward = this.keyW.isDown || this.cursors.up.isDown;
-    const onLeft = this.keyA.isDown || this.cursors.left.isDown;
-    const onRight = this.keyD.isDown || this.cursors.right.isDown;
-    const onBoost = this.keySpace.isDown;
-
-    // Drift meter grows when turning while moving
-    const turning = (onLeft || onRight) && (onForward || this.player.speed > 0);
-    if (turning) {
-      this.player.driftMeter = Math.min(this.MAX_DRIFT, this.player.driftMeter + 0.8);
-    } else {
-      this.player.driftMeter = Math.max(0, this.player.driftMeter - 0.5);
-    }
-
-    // Boost activation
-    if (onBoost && this.player.driftMeter >= 100) {
-      this.player.boostActive = true;
-      this.player.boostTimer = 120; // frames ~2 seconds at 60fps
-    }
-
-    // Gentle engine turn-based logic
-    // Update angle
-    if (onLeft) this.player.sprite.angle -= 2.4;
-    if (onRight) this.player.sprite.angle += 2.4;
-
-    // Acceleration
-    if (onForward) {
-      this.player.speed += this.player.acceleration;
-      if (this.player.speed > this.player.maxSpeed) this.player.speed = this.player.maxSpeed;
-    } else {
-      // natural friction
-      this.player.speed *= this.player.friction;
-      if (Math.abs(this.player.speed) < 0.5) this.player.speed = 0;
-    }
-
-    // Boost effect
-    if (this.player.boostActive) {
-      const boostPower = 2.6;
-      this.player.speed += boostPower;
-      this.player.boostTimer--;
-      if (this.player.boostTimer <= 0) {
-        this.player.boostActive = false;
-      }
-      // Drain drift meter while boosting
-      this.player.driftMeter = Math.max(0, this.player.driftMeter - 1.5);
-    }
-
-    // Move player
-    const vx = Math.cos(this.player.sprite.angle * Phaser.Math.DEG_TO_RAD) * this.player.speed;
-    const vy = Math.sin(this.player.sprite.angle * Phaser.Math.DEG_TO_RAD) * this.player.speed;
-    this.player.sprite.setVelocity(vx, vy);
-
-    // Wrap aura glow near boosting (visual cue by tint)
-    if (this.player.boostActive) {
-      this.player.sprite.setTint(0x00ffea);
-    } else {
-      this.player.sprite.clearTint();
-    }
-
-    // Gravity wells interaction (continuous field forces)
-    this.applyGravityWells();
-
-    // Boost pad impulse (if touching pad)
-    this.checkBoostPads();
-
-    // Pit stop slow-down
-    this.applyPitStop();
-
-    // Collision handling with obstacles
-    this.checkObstacleCollisions();
-
-    // Rival AI movement
-    this.updateRivalAI(delta);
-
-    // Finish line crossing and lap progression
-    this.checkFinishCrossing();
-
-    // Rival overlap cooldown
-    if (this.playerRivalOverlapCooldown > 0) this.playerRivalOverlapCooldown--;
-
-    // Update UI
-    this.updateUI();
-
-    // Parallax update for grid background
-    const cam = this.cameras.main;
-    this.gridBG.tilePositionX = cam.scrollX * 0.95;
-    this.gridBG.tilePositionY = cam.scrollY * 0.95;
-  }
-
-  applyGravityWells() {
-    // Simple directional acceleration when inside gravity field
-    const x = this.player.sprite.x;
-    const y = this.player.sprite.y;
-    for (let g of this.gravityFields) {
-      const dx = g.x - x;
-      const dy = g.y - y;
-      const dist = Math.sqrt(dx*dx + dy*dy);
-      if (dist < g.radius && dist > 2) {
-        // normalize
-        const nx = dx / dist;
-        const ny = dy / dist;
-        // apply force toward center (field strength)
-        this.player.sprite.body.velocity.x += nx * g.strength;
-        this.player.sprite.body.velocity.y += ny * g.strength;
-      }
-    }
-  }
-
-  checkBoostPads() {
-    const px = this.player.sprite.x;
-    const py = this.player.sprite.y;
-    for (let p of this.boostPads) {
-      const d = Phaser.Math.Distance.Between(px, py, p.x, p.y);
-      if (d <= p.radius) {
-        // boost impulse on pad
-        this.player.speed += p.impulse * 30; // scale to pixels/frame
-        // short boost
-        this.player.boostActive = true;
-        this.player.boostTimer = Math.max(this.player.boostTimer, Math.floor(p.duration * 60));
-      }
-    }
-  }
-
-  applyPitStop() {
-    const px = this.player.sprite.x;
-    const py = this.player.sprite.y;
-    // Pit stop slows car for a fixed duration; simple model: if inside, reduce speed multiplier
-    let inside = false;
-    for (let t of this.pitStops) {
-      const d = Phaser.Math.Distance.Between(px, py, t.x, t.y);
-      if (d <= t.radius) {
-        inside = true;
-        break;
-      }
-    }
-    if (inside) {
-      // gently slow
-      this.player.speed *= 0.92;
-      this.player.sprite.setAlpha(0.95);
-    } else {
-      this.player.sprite.setAlpha(1.0);
-    }
-  }
-
-  checkObstacleCollisions() {
-    const px = this.player.sprite.x;
-    const py = this.player.sprite.y;
-    for (let o of this.obstacles) {
-      const d = Phaser.Math.Distance.Between(px, py, o.x, o.y);
-      if (d <= o.radius + 12) { // collision threshold
-        if (this.player.collisionCooldown <= 0) {
-          // simple penalty: lose some shield or slow dramatically
-          if (this.player.shield > 0) {
-            this.player.shield -= 20;
-          } else {
-            // crash -> game over-ish
-            this.gameOverScreen(false);
-          }
-          this.player.collisionCooldown = 60; // cooldown
+    
+    // Create simple procedural sounds
+    createSimpleAudio() {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        
+        // Water ambient sound (low-pass filtered noise)
+        const waterBuffer = ctx.createBuffer(1, ctx.sampleRate * 3, ctx.sampleRate);
+        const waterData = waterBuffer.getChannelData(0);
+        for (let i = 0; i < waterData.length; i++) {
+            waterData[i] = (Math.random() * 2 - 1) * 0.1;
         }
+        
+        // Cricket sound (modulated sine)
+        const cricketBuffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+        const cricketData = cricketBuffer.getChannelData(0);
+        for (let i = 0; i < cricketData.length; i++) {
+            const t = i / ctx.sampleRate;
+            cricketData[i] = Math.sin(t * 2 * Math.PI * 1500) * 
+                             (Math.sin(t * 2 * Math.PI * 5) * 0.5 + 0.5) * 0.05;
+        }
+        
+        // Fire crackle (short noise bursts)
+        const fireBuffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+        const fireData = fireBuffer.getChannelData(0);
+        for (let i = 0; i < fireData.length; i++) {
+            fireData[i] = Math.random() < 0.01 ? (Math.random() * 2 - 1) * 0.5 : 0;
+        }
+        
+        return { water: waterBuffer, cricket: cricketBuffer, fire: fireBuffer };
+    }
+    
+    create() {
+      this.gameState = 'PLAYING';
+      this.inventory = { wood: 0, stone: 0 };
+      this.required = { wood: 3, stone: 4 };
+
+      this.goals = {
+          campfire: 'NEEDS_PIT',
+          tent: 'NOT_PITCHED'
+      };
+
+      this.interacting = false;
+
+      this.createLandscape();
+      this.initLightingAndCycle();
+      this.initSounds();
+
+      this.createPlayer();
+      this.createCollectibles();
+      this.createCampfire();
+      this.createTent();
+      this.createUI();
+
+      this.keys = this.input.keyboard.addKeys('W,A,S,D');
+
+      this.physics.add.overlap(this.player, this.collectibles, this.collectItem, null, this);
+      this.physics.add.overlap(this.player, this.campfire, this.interactWithCampfire, null, this);
+      this.physics.add.overlap(this.player, this.tent, this.interactWithTent, null, this);
+    }
+
+    update() {
+      if (this.gameState === 'PLAYING') {
+        this.updatePlayer();
       }
     }
-    if (this.player.collisionCooldown > 0) this.player.collisionCooldown--;
-  }
 
-  checkFinishCrossing() {
-    // Use a dedicated finish zone rectangle for robust detection
-    const p = this.player.sprite;
-    const inside = Phaser.Geom.Rectangle.ContainsPoint(this.finishZoneRect, new Phaser.Geom.Point(p.x, p.y));
-    if (inside && !this.finishCrossedThisLap) {
-      // Gate opens at crossing; count one lap
-      this.finishCrossedThisLap = true;
-      this.player.lap += 1;
-      // Compute lapSec before resetting timer
-      const lapSec = (this.time.now - this.startTime) / 1000;
-      this.player.lapTimes.push(lapSec);
-      // Best lap time calculation
-      if (this.bestLapTime == null || lapSec < this.bestLapTime) {
-        this.bestLapTime = lapSec;
-      }
-      // reset timer for next lap
-      this.startTime = this.time.now;
-
-      // Win condition if reached laps_required
-      if (this.player.lap >= this.track.laps_required) {
-        this.gameOverScreen(true);
-      }
+    createLandscape() {
+      this.add.rectangle(450, 380, 900, 440, 0x1a4d1a).setDepth(-1);
+      this.add.rectangle(450, 80, 900, 160, 0x0055aa).setDepth(-1);
     }
 
-    // Reset the gate once the car leaves the finish zone
-    if (!inside) {
-      this.finishCrossedThisLap = false;
+    initLightingAndCycle() {
+        this.lights.enable();
+        this.lights.setAmbientColor(0xdddddd);
+
+        const dayColor = new Phaser.Display.Color(221, 221, 221);
+        const nightColor = new Phaser.Display.Color(20, 20, 50);
+
+        this.tweens.add({
+            targets: { value: 0 },
+            value: 1,
+            duration: 180000,
+            ease: 'Sine.easeInOut',
+            onUpdate: (tween) => {
+                const colorObject = Phaser.Display.Color.Interpolate.ColorWithColor(
+                    dayColor, nightColor, 100, tween.getValue() * 100
+                );
+                const color = Phaser.Display.Color.GetColor(colorObject.r, colorObject.g, colorObject.b);
+                this.lights.setAmbientColor(color);
+            }
+        });
+    }
+
+    initSounds() {
+        // Play simple ambient sounds using Web Audio API
+        try {
+            const audioBuffers = this.createSimpleAudio();
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            
+            // Water sound
+            const waterSource = ctx.createBufferSource();
+            waterSource.buffer = audioBuffers.water;
+            waterSource.loop = true;
+            const waterGain = ctx.createGain();
+            waterGain.gain.value = 0.2;
+            waterSource.connect(waterGain);
+            waterGain.connect(ctx.destination);
+            waterSource.start(0);
+            
+            // Cricket sound
+            const cricketSource = ctx.createBufferSource();
+            cricketSource.buffer = audioBuffers.cricket;
+            cricketSource.loop = true;
+            const cricketGain = ctx.createGain();
+            cricketGain.gain.value = 0.1;
+            cricketSource.connect(cricketGain);
+            cricketGain.connect(ctx.destination);
+            cricketSource.start(0);
+            
+            // Fire sound (stored for later volume control)
+            this.fireSource = ctx.createBufferSource();
+            this.fireSource.buffer = audioBuffers.fire;
+            this.fireSource.loop = true;
+            this.fireGain = ctx.createGain();
+            this.fireGain.gain.value = 0;
+            this.fireSource.connect(this.fireGain);
+            this.fireGain.connect(ctx.destination);
+            this.fireSource.start(0);
+        } catch (e) {
+            console.log('Audio context not available');
+        }
+    }
+
+    createPlayer() {
+      this.player = this.physics.add.sprite(100, 300, 'player');
+      this.player.setCollideWorldBounds(true);
+      this.player.setDepth(5);
+      this.player.speed = 200;
+    }
+
+    createCollectibles() {
+      this.collectibles = this.physics.add.group();
+      const spawnArea = new Phaser.Geom.Rectangle(50, 200, 800, 350);
+
+      const spawnItems = (key, type, count) => {
+        for (let i = 0; i < count; i++) {
+            let pos = Phaser.Geom.Rectangle.Random(spawnArea);
+            const item = this.collectibles.create(pos.x, pos.y, key);
+            item.itemType = type;
+            item.setDepth(1);
+        }
+      };
+
+      spawnItems('wood', 'wood', 8);
+      spawnItems('stone', 'stone', 10);
+    }
+    
+    createCampfire() {
+      this.campfire = this.physics.add.sprite(450, 300, 'campfire_empty');
+      this.campfire.setImmovable(true);
+      this.campfire.setDepth(1);
+      this.campfireLight = null;
+    }
+
+    createTent() {
+      this.tent = this.physics.add.sprite(750, 450, 'tent_materials');
+      this.tent.setImmovable(true);
+      this.tent.setDepth(1);
+    }
+
+    updatePlayer() {
+      this.player.setVelocity(0);
+      if (this.keys.W.isDown) this.player.setVelocityY(-this.player.speed);
+      if (this.keys.S.isDown) this.player.setVelocityY(this.player.speed);
+      if (this.keys.A.isDown) this.player.setVelocityX(-this.player.speed);
+      if (this.keys.D.isDown) this.player.setVelocityX(this.player.speed);
+    }
+
+    collectItem(player, item) {
+      this.inventory[item.itemType]++;
+      item.destroy();
+      this.updateUI();
+    }
+
+    interactWithCampfire() {
+        if (this.interacting) return;
+        
+        if (this.goals.campfire === 'NEEDS_PIT' && this.inventory.stone >= this.required.stone) {
+            this.interacting = true;
+            this.inventory.stone -= this.required.stone;
+            this.goals.campfire = 'NEEDS_WOOD';
+            this.campfire.setTexture('campfire_pit');
+            this.updateUI();
+            this.time.delayedCall(500, () => { this.interacting = false; });
+        } else if (this.goals.campfire === 'NEEDS_WOOD' && this.inventory.wood >= this.required.wood) {
+            this.interacting = true;
+            this.inventory.wood -= this.required.wood;
+            this.goals.campfire = 'LIT';
+            this.campfire.setTexture('campfire_lit');
+            this.lightTheFire();
+            this.updateUI();
+            this.checkWinCondition();
+            this.time.delayedCall(500, () => { this.interacting = false; });
+        }
+    }
+
+    interactWithTent() {
+        if (this.interacting) return;
+        
+        if (this.goals.tent === 'NOT_PITCHED') {
+            this.interacting = true;
+            this.goals.tent = 'PITCHED';
+            this.tent.setTexture('tent_pitched');
+            this.updateUI();
+            this.checkWinCondition();
+            this.time.delayedCall(500, () => { this.interacting = false; });
+        }
+    }
+
+    lightTheFire() {
+        if (this.fireGain) {
+            this.tweens.add({
+                targets: this.fireGain.gain,
+                value: 0.6,
+                duration: 1000
+            });
+        }
+        
+        if (this.campfireLight) {
+            this.campfireLight.destroy();
+        }
+        
+        this.campfireLight = this.lights.addLight(this.campfire.x, this.campfire.y, 250, 0xffa500, 1.5);
+
+        this.time.addEvent({
+            delay: 100,
+            loop: true,
+            callback: () => {
+                if (this.campfireLight) {
+                    this.campfireLight.intensity = 1.5 + Math.random() * 0.5;
+                    this.campfireLight.radius = 250 + Math.random() * 30;
+                }
+            }
+        });
+    }
+
+    checkWinCondition() {
+        if (this.goals.campfire === 'LIT' && this.goals.tent === 'PITCHED') {
+            this.gameState = 'WON';
+            this.time.delayedCall(1000, this.showVictory, [], this);
+        }
+    }
+
+    showVictory() {
+      this.add.rectangle(450, 300, 900, 600, 0x000000, 0.8).setDepth(100);
+      this.add.text(450, 250, 'Camp is Set!', {
+        fontFamily: 'monospace', fontSize: 48, color: '#ffff00', fontStyle: 'bold', align: 'center'
+      }).setOrigin(0.5).setDepth(101);
+      this.add.text(450, 320, 'You survived the night!', {
+        fontFamily: 'monospace', fontSize: 24, color: '#cccccc', align: 'center'
+      }).setOrigin(0.5).setDepth(101);
+      this.add.text(450, 450, 'Click to Play Again', {
+        fontFamily: 'monospace', fontSize: 18, color: '#888888', align: 'center'
+      }).setOrigin(0.5).setDepth(101).setInteractive();
+      this.input.once('pointerdown', () => this.scene.restart());
+    }
+
+    createUI() {
+      const style = { fontFamily: 'monospace', fontSize: 16, color: '#ffffff', backgroundColor: 'rgba(0,0,0,0.5)', padding: { x: 8, y: 4 }};
+      this.stoneText = this.add.text(16, 16, '', style).setDepth(50);
+      this.woodText = this.add.text(16, 46, '', style).setDepth(50);
+      this.fireText = this.add.text(16, 76, '', style).setDepth(50);
+      this.tentText = this.add.text(16, 106, '', style).setDepth(50);
+      this.updateUI();
+    }
+
+    updateUI() {
+        this.stoneText.setText(`Stones: ${this.inventory.stone} / ${this.required.stone}`);
+        this.woodText.setText(`Wood:   ${this.inventory.wood} / ${this.required.wood}`);
+
+        let fireStatus = '';
+        switch(this.goals.campfire) {
+            case 'NEEDS_PIT': fireStatus = `🔥 Bring ${this.required.stone} stones to fire pit`; break;
+            case 'NEEDS_WOOD': fireStatus = `🔥 Bring ${this.required.wood} wood to fire pit`; break;
+            case 'LIT': fireStatus = '✅ Fire is lit!'; break;
+        }
+        this.fireText.setText(fireStatus);
+        
+        let tentStatus = this.goals.tent === 'PITCHED' ? '✅ Tent is pitched!' : '⛺ Go to tent materials to build';
+        this.tentText.setText(tentStatus);
     }
   }
-
-  updateRivalAI(delta) {
-    // Simple loop along waypoints
-    const r = this.rival;
-    const target = r.waypoints[r.pathIndex];
-    const dx = target.x - r.sprite.x;
-    const dy = target.y - r.sprite.y;
-    const dist = Math.sqrt(dx*dx + dy*dy);
-    if (dist < 20) {
-      r.pathIndex = (r.pathIndex + 1) % r.waypoints.length;
-    } else {
-      // angle toward target
-      const desiredAngleDeg = Phaser.Math.RadToDeg(Math.atan2(dy, dx));
-      // current angle
-      let currentAngle = r.sprite.angle;
-      // compute diff and wrap to [-180,180]
-      let diff = desiredAngleDeg - currentAngle;
-      diff = ((diff + 180) % 360) - 180;
-      // turn a little toward target
-      const turn = 2.5;
-      if (diff > 0) r.sprite.angle = currentAngle + Math.min(diff, turn);
-      else r.sprite.angle = currentAngle + Math.max(diff, -turn);
-
-      // set speed
-      const rad = r.sprite.angle * Phaser.Math.DEG_TO_RAD;
-      r.sprite.setVelocity(Math.cos(rad) * r.maxSpeed, Math.sin(rad) * r.maxSpeed);
-    }
-  }
-
-  // Overlap handler for player vs rival
-  handlePlayerRivalOverlap(playerSprite, rivalSprite) {
-    if (this.playerRivalOverlapCooldown > 0) return;
-    // Simple knockback impulse
-    const dx = playerSprite.x - rivalSprite.x;
-    const dy = playerSprite.y - rivalSprite.y;
-    const dist = Math.max(Math.sqrt(dx*dx + dy*dy), 1);
-    const nx = dx / dist;
-    const ny = dy / dist;
-    const impulse = 180;
-    playerSprite.body.velocity.x += nx * impulse;
-    playerSprite.body.velocity.y += ny * impulse;
-
-    // Apply small push to rival away
-    rivalSprite.body.velocity.x -= nx * (impulse * 0.5);
-    rivalSprite.body.velocity.y -= ny * (impulse * 0.5);
-
-    this.playerRivalOverlapCooldown = 60; // frames
-  }
-
-  // UI readout
-  updateBestLap() {
-    // placeholder
-  }
-
-  // Helpers
-  spawnProjectile() {
-    // Optional: not implemented as core mechanic; kept for future expansion
-  }
-
-  // Finish
-  resize() {
-    // not used
-  }
-}
-
-// Bootstrapping the game
-const config = {
-  type: Phaser.AUTO,
-  width: 1024,
-  height: 1024,
-  parent: 'phaser-game',
-  backgroundColor: '#0a0a0a',
-  scene: [NeonRacerScene],
-  physics: {
-    default: 'arcade',
-    arcade: {
-      gravity: { x: 0, y: 0 },
-      debug: false
-    }
-  }
-};
-
-const game = new Phaser.Game(config);
   </script>
+
+  <script>
+  const config = {
+    type: Phaser.AUTO,
+    width: 900,
+    height: 600,
+    backgroundColor: 0x001a33,
+    physics: {
+      default: 'arcade',
+      arcade: {
+        gravity: { y: 0 },
+        debug: false
+      }
+    },
+    scene: [CampingScene]
+  };
+  </script>
+
+  <script>
+  window.onload = () => {
+    const game = new Phaser.Game(config);
+  };
+  </script>
+
 </body>
 </html>

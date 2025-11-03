@@ -1,39 +1,35 @@
+
 import os
 import json
 import uuid
 import re
-import time
 from typing import TypedDict, List, Dict, Any
 from datetime import datetime
+import time
 from dotenv import load_dotenv
 
+load_dotenv()
 
+if "GOOGLE_API_KEY" not in os.environ:
+    raise ValueError("GOOGLE_API_KEY environment variable not set. Please set it before running.")
+
+# LangGraph imports
 from langgraph.graph import StateGraph, END
 from langgraph.types import interrupt
 from langgraph.checkpoint.memory import MemorySaver
-from langchain_anthropic import ChatAnthropic
 
+# Gemini LLM wrapper
+from langchain_google_genai import ChatGoogleGenerativeAI
 
-# ================================================
-#  ENV + MODEL SETUP
-# ================================================
-load_dotenv()
+# Initialize LLM (Gemini)
+llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro")
+
 MAX_FIX_ITERATIONS = 2
 MAX_FEEDBACK_ITERATIONS = 2
 
-
-if "ANTHROPIC_API_KEY" not in os.environ:
-    raise ValueError("ANTHROPIC_API_KEY environment variable not set. Please set it before running.")
-
-
-llm = ChatAnthropic(
-    model=os.getenv("ANTHROPIC_MODEL", "claude-opus-4-1-20250805"),
-)
-
-
-# ================================================
-#  STATE DEFINITION
-# ================================================
+# -------------------------
+# State type definition
+# -------------------------
 class GameAgentState(TypedDict, total=False):
     session_id: str
     user_raw_input: str
@@ -123,7 +119,7 @@ def generate_questions(state: GameAgentState) -> GameAgentState:
 You are a Phaser mini-game UX designer.
 
 
-Generate 6 concise multiple-choice questions to help design a simple 2D mini-game (like dress-up, football, or board game).
+Generate 6 concise multiple-choice questions to help design a simple 2D mini-game (like dress-up, football, or board game etc).
 
 
 For each question, include 3–5 options and mark if required.
@@ -246,13 +242,14 @@ Base Game Code (snippet):
 {base_code}
 
 
-Suggest specific changes to visuals and gameplay features that fit the user's preferences.
+Suggest minor specific changes to visuals and gameplay features that fit the user's preferences.
+Sound is not needed.
 
 
 Respond JSON only:
 {{
   "visual_changes": ["list of color, background, character, or UI changes"],
-  "feature_changes": ["simple gameplay tweaks like add timer, score, or sounds"]
+  "feature_changes": ["simple gameplay tweaks like add timer, score"]
 }}
 """
     out = llm_invoke_text(prompt)
@@ -276,7 +273,7 @@ You are a Phaser 3 developer.
 
 
 TASK:
-Apply the following modifications to this game code safely without breaking it.
+Apply the following modifications to this game code safely without breaking it.Be Minimal .
 
 
 VISUAL CHANGES:
@@ -316,7 +313,8 @@ def review_code(state: GameAgentState) -> GameAgentState:
     intent = state.get("intent", {})
     mechanics = state.get("mechanics_blueprint", {})
     pseudocode = state.get("pseudocode_plan", "")
-    
+    changes = state.get("game_modifications", {})
+
     log_timestamp(f"🔍 Starting enhanced review (iteration #{fix_iteration})...")
     log_timestamp(f"📊 Code stats: {len(code)} chars, {code.count('function')} functions")
 
@@ -332,55 +330,20 @@ def review_code(state: GameAgentState) -> GameAgentState:
     
     # Construct enhanced review prompt
     prompt = f"""
-You are reviewing this HTML Phaser 3 game.
-========================IMPORTANT========================
-make sure this game is playable and correct phaser API are used
+check whether the below code works or not and won't crash on opening , make sure correct apis are used for phaser and no functions break and that it the mentioned feature and visual changes have been done
+
+VISUAL CHANGES:
+{json.dumps(changes.get('visual_changes', []), indent=2)}
 
 
-
-──────────────────────────────
-MECHANICS BLUEPRINT (SUMMARY)
-──────────────────────────────
-{json.dumps(mechanics, indent=2)}
+FEATURE CHANGES:
+{json.dumps(changes.get('feature_changes', []), indent=2)}
 
 
 ──────────────────────────────
 GAME CODE 
 ──────────────────────────────
 {code}
-
-
-──────────────────────────────
-REVIEW CHECKLIST
-──────────────────────────────
-
-
-
-2. **Engine Sanity**
-   eg:-
-   - Any invalid Phaser API calls? (e.g., createCanvas().draw())
-   - Missing generateTexture() before sprite use?
-   - Proper use of preload(), create(), and update()?
-
-
-
-3. **Visual Sanity**
-   eg:-
-   - Would something visible appear when loaded? (background, entities, text)
-   - Are key sprites drawn or filled with color?
-
-
-4. **Core Mechanics**
-   eg:-
-   - Is the player controllable (e.g., WASD or arrow keys)?
-   - Is there a visible feedback loop (score, health)?
-   - Do collisions or interactions occur?
-
-
-5. **Functional Stability**
-   eg:-
-   - Any logic that could crash or hang (undefined vars, missing textures)?
-   - GameOver / Restart systems functioning?
 
 
 ──────────────────────────────
@@ -494,28 +457,23 @@ def fix_game_code(state: GameAgentState) -> GameAgentState:
 
 
     prompt = f"""
-You are a game developer fixing code based on QA feedback.
 
 
-ENGINE: {engine}
-
+Below is the code that crashes , i have also found some errors (there might be more so check) , Now fix this code for me .
+ORIGINAL CODE:
+{code}
 
 ISSUES IDENTIFIED:
 {json.dumps(issues, indent=2)}
 
 
-SUGGESTIONS:
-{suggestions}
 
-
-FIXING PRINCIPLES:
+FIXING PRINCIPLE:
 
 
 Keep all working code unchanged. Only modify what's broken.
 
 
-ORIGINAL CODE:
-{code}
 
 
 Return ONLY the complete fixed HTML. No markdown fences. No explanations.

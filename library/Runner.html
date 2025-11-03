@@ -1,0 +1,257 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Endless Runner - Phaser Template</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html,body { margin:0; padding:0; background:#111; height:100%; }
+    .hint { position: absolute; right: 12px; top: 12px; color:#ddd; font-family: monospace; font-size:13px; background: rgba(0,0,0,0.25); padding:8px; border-radius:6px; z-index: 1000;}
+  </style>
+</head>
+<body>
+  <div class="hint">SPACE or ↑ to Jump</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+
+  <!-- REGION:SCENE_CLASS_START -->
+  <script>
+  class RunnerScene extends Phaser.Scene {
+    constructor() { super('RunnerScene'); }
+    
+    preload() {
+      // Generate all textures once in preload
+      this.generateTextures();
+    }
+    
+    generateTextures() {
+      // Player texture
+      if (!this.textures.exists('runner')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xffcc66, 1);
+        g.fillRoundedRect(0, 0, 32, 48, 8);
+        g.fillStyle(0x000000, 1);
+        g.fillCircle(10, 14, 3);
+        g.fillCircle(22, 14, 3);
+        g.generateTexture('runner', 32, 48);
+        g.destroy();
+      }
+
+      // Ground texture
+      if (!this.textures.exists('ground')) {
+        const g = this.add.graphics();
+        g.fillStyle(0x223344, 1);
+        g.fillRect(0, 0, 64, 16);
+        g.generateTexture('ground', 64, 16);
+        g.destroy();
+      }
+
+      // Obstacle texture
+      if (!this.textures.exists('obstacle')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xff5555, 1);
+        g.fillRect(0, 0, 24, 40);
+        g.generateTexture('obstacle', 24, 40);
+        g.destroy();
+      }
+    }
+    
+    create() {
+      // Ground setup
+      this.platforms = this.physics.add.staticGroup();
+      this.createGround();
+
+      // Player
+      this.createPlayer();
+
+      // Input
+      this.cursors = this.input.keyboard.createCursorKeys();
+      this.keys = this.input.keyboard.addKeys('SPACE');
+
+      // Obstacles
+      this.obstacles = this.physics.add.group();
+      this.spawnTimer = this.time.addEvent({ 
+        delay: 1800, 
+        callback: this.spawnObstacle, 
+        callbackScope: this, 
+        loop: true 
+      });
+
+      // Score + UI
+      this.score = 0;
+      this.gameOver = false;
+      this.createUI();
+
+      // Collisions
+      this.physics.add.collider(this.player, this.platforms);
+      this.physics.add.collider(this.obstacles, this.platforms);
+      this.physics.add.overlap(this.player, this.obstacles, this.onHit, null, this);
+    }
+
+    update() {
+      if (this.gameOver) return;
+
+      this.updatePlayer();
+      
+      // Clean up off-screen obstacles
+      this.obstacles.children.iterate(obs => {
+        if (obs && obs.active && obs.x < -50) {
+          obs.destroy();
+        }
+      });
+    }
+
+    createPlayer() {
+      // Calculate proper spawn position (ground level - player height)
+      const groundY = this.scale.height - 16;
+      const playerSpawnY = groundY - 24; // half of player height to sit on ground
+      
+      this.player = this.physics.add.sprite(120, playerSpawnY, 'runner');
+      this.player.setCollideWorldBounds(true);
+      // REMOVED: this.player.setGravityY(1000); // BUG: This adds to world gravity!
+      this.player.setDepth(5);
+      this.player.body.setSize(28, 44).setOffset(2, 2);
+    }
+
+    updatePlayer() {
+      const isGrounded = this.player.body.touching.down;
+      
+      if ((this.cursors.up.isDown || this.keys.SPACE.isDown) && isGrounded) {
+        this.player.setVelocityY(-500);
+      }
+    }
+
+    createGround() {
+      // Create ground at bottom with proper positioning
+      const groundY = this.scale.height - 8; // Center of 16px tile at height-8
+      
+      for (let x = 32; x < this.scale.width + 64; x += 64) {
+        const ground = this.platforms.create(x, groundY, 'ground');
+        ground.setOrigin(0.5, 0.5).refreshBody();
+      }
+    }
+
+    spawnObstacle() {
+      if (this.gameOver) return;
+
+      // Calculate proper obstacle spawn position (ground level - obstacle height/2)
+      const groundY = this.scale.height - 16;
+      const obstacleSpawnY = groundY - 20; // half of 40px obstacle height
+
+      const obs = this.obstacles.create(
+        this.scale.width + 20, 
+        obstacleSpawnY, 
+        'obstacle'
+      );
+      obs.setVelocityX(-260);
+      obs.body.setAllowGravity(false); // Obstacles don't need gravity
+      obs.setImmovable(true);
+      obs.body.setSize(22, 38).setOffset(1, 1);
+    }
+
+    onHit(player, obs) {
+      if (this.gameOver) return;
+      
+      this.gameOver = true;
+      this.physics.pause();
+      player.setTint(0xff4444);
+      
+      // Stop spawning obstacles
+      if (this.spawnTimer) {
+        this.spawnTimer.remove();
+      }
+      
+      this.showGameOver();
+    }
+
+    createUI() {
+      this.scoreText = this.add.text(16, 16, 'Score: 0', { 
+        fontFamily: 'monospace', 
+        fontSize: 18, 
+        color: '#fff' 
+      }).setScrollFactor(0);
+      
+      this.timer = this.time.addEvent({
+        delay: 100,
+        loop: true,
+        callback: () => {
+          if (!this.physics.world.isPaused && !this.gameOver) {
+            this.score += 1;
+            this.scoreText.setText('Score: ' + this.score);
+          }
+        }
+      });
+    }
+
+    showGameOver() {
+      this.add.text(
+        this.scale.width / 2, 
+        this.scale.height / 2 - 40, 
+        'Game Over', 
+        { 
+          fontFamily: 'monospace', 
+          fontSize: 40, 
+          color: '#fff' 
+        }
+      ).setOrigin(0.5);
+      
+      this.add.text(
+        this.scale.width / 2, 
+        this.scale.height / 2 + 10, 
+        'Score: ' + this.score, 
+        { 
+          fontFamily: 'monospace', 
+          fontSize: 24, 
+          color: '#ffd700' 
+        }
+      ).setOrigin(0.5);
+      
+      this.add.text(
+        this.scale.width / 2, 
+        this.scale.height / 2 + 50, 
+        'Click to Restart', 
+        { 
+          fontFamily: 'monospace', 
+          fontSize: 16, 
+          color: '#ccc' 
+        }
+      ).setOrigin(0.5);
+      
+      this.input.once('pointerdown', () => {
+        this.scene.restart();
+      });
+    }
+  }
+  </script>
+  <!-- REGION:SCENE_CLASS_END -->
+
+  <!-- REGION:CONFIG_START -->
+  <script>
+  const config = {
+    type: Phaser.AUTO,
+    width: 900,
+    height: 480,
+    backgroundColor: 0x1c1c28,
+    physics: {
+      default: 'arcade',
+      arcade: { 
+        gravity: { y: 1000 }, 
+        debug: false 
+      }
+    },
+    scene: [RunnerScene]
+  };
+  </script>
+  <!-- REGION:CONFIG_END -->
+
+  <!-- REGION:GAME_INIT_START -->
+  <script>
+  window.onload = () => {
+    const game = new Phaser.Game(config);
+  };
+  </script>
+  <!-- REGION:GAME_INIT_END -->
+
+</body>
+</html>

@@ -1,0 +1,358 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Fighting Game - Human vs AI</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html,body { margin:0; padding:0; background:#111; height:100%; }
+    .hint { position: absolute; right: 12px; top: 12px; color:#ddd; font-family: monospace; font-size:13px; background: rgba(0,0,0,0.25); padding:8px; border-radius:6px; z-index: 1000;}
+  </style>
+</head>
+<body>
+  <div class="hint">A/D to move • W to jump • F to punch</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+
+  <!-- REGION:SCENE_CLASS_START -->
+  <script>
+  class FightScene extends Phaser.Scene {
+    constructor() { super('FightScene'); }
+    
+    preload() {
+      this.generateTextures();
+    }
+    
+    generateTextures() {
+      // Player texture (blue)
+      if (!this.textures.exists('p1tex')) {
+        const g = this.add.graphics();
+        g.fillStyle(0x33aaff, 1);
+        g.fillRect(0, 0, 40, 60);
+        g.fillStyle(0xffffff, 1);
+        g.fillCircle(20, 15, 8);
+        g.fillStyle(0x000000, 1);
+        g.fillCircle(20, 15, 3);
+        g.generateTexture('p1tex', 40, 60);
+        g.destroy();
+      }
+
+      // AI texture (red)
+      if (!this.textures.exists('p2tex')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xff5566, 1);
+        g.fillRect(0, 0, 40, 60);
+        g.fillStyle(0xffffff, 1);
+        g.fillCircle(20, 15, 8);
+        g.fillStyle(0x000000, 1);
+        g.fillCircle(20, 15, 3);
+        g.generateTexture('p2tex', 40, 60);
+        g.destroy();
+      }
+
+      // Ground texture
+      if (!this.textures.exists('ground')) {
+        const g = this.add.graphics();
+        g.fillStyle(0x2d2d44, 1);
+        g.fillRect(0, 0, 64, 40);
+        g.generateTexture('ground', 64, 40);
+        g.destroy();
+      }
+    }
+    
+    create() {
+      this.createStage();
+      this.createPlayers();
+      this.createUI();
+
+      this.physics.add.collider(this.player, this.platforms);
+      this.physics.add.collider(this.ai, this.platforms);
+
+      // Only human player has keyboard input
+      this.input.keyboard.on('keydown-F', () => this.attack(this.player, this.ai));
+      
+      this.gameOver = false;
+      
+      // AI decision timer
+      this.aiTimer = this.time.addEvent({
+        delay: 150,
+        callback: this.updateAI,
+        callbackScope: this,
+        loop: true
+      });
+    }
+
+    update() {
+      if (this.gameOver) return;
+      
+      this.updatePlayer(this.player, this.keys1);
+    }
+
+    createStage() {
+      this.platforms = this.physics.add.staticGroup();
+      
+      const groundY = this.scale.height - 20;
+      for (let x = 32; x < this.scale.width; x += 64) {
+        const ground = this.platforms.create(x, groundY, 'ground');
+        ground.setOrigin(0.5, 0.5).refreshBody();
+      }
+    }
+
+    createPlayers() {
+      const groundY = this.scale.height - 40;
+      const spawnY = groundY - 30;
+
+      // Human player
+      this.player = this.physics.add.sprite(200, spawnY, 'p1tex');
+      this.player.setCollideWorldBounds(true);
+      this.player.body.setSize(36, 58).setOffset(2, 1);
+      this.player.hp = 5;
+      this.player.cooldown = false;
+      this.player.facing = 1;
+
+      // AI opponent
+      this.ai = this.physics.add.sprite(760, spawnY, 'p2tex');
+      this.ai.setCollideWorldBounds(true);
+      this.ai.body.setSize(36, 58).setOffset(2, 1);
+      this.ai.hp = 5;
+      this.ai.cooldown = false;
+      this.ai.facing = -1;
+      
+      // AI state
+      this.ai.state = 'approach';
+      this.ai.reactionTime = 0;
+
+      // Controls (only for player)
+      this.keys1 = this.input.keyboard.addKeys('A,D,W');
+    }
+
+    updatePlayer(player, keys) {
+      const isGrounded = player.body.touching.down;
+      
+      if (keys.left?.isDown || keys.A?.isDown) {
+        player.setVelocityX(-200);
+        player.facing = -1;
+      } else if (keys.right?.isDown || keys.D?.isDown) {
+        player.setVelocityX(200);
+        player.facing = 1;
+      } else {
+        player.setVelocityX(0);
+      }
+
+      if ((keys.up?.isDown || keys.W?.isDown) && isGrounded) {
+        player.setVelocityY(-500);
+      }
+    }
+
+    updateAI() {
+      if (this.gameOver || !this.ai || !this.player) return;
+
+      const distance = Math.abs(this.ai.x - this.player.x);
+      const isGrounded = this.ai.body.touching.down;
+      
+      // Update facing direction
+      this.ai.facing = this.ai.x < this.player.x ? 1 : -1;
+
+      // AI Decision Making
+      if (this.ai.reactionTime > 0) {
+        this.ai.reactionTime--;
+        return;
+      }
+
+      // State machine with decision tree
+      if (distance < 60) {
+        // Close range - attack or retreat
+        if (Math.random() > 0.3 && !this.ai.cooldown) {
+          this.attack(this.ai, this.player);
+          this.ai.reactionTime = Phaser.Math.Between(3, 6);
+        } else {
+          // Retreat
+          this.ai.setVelocityX(this.ai.facing * -150);
+        }
+      } else if (distance < 150) {
+        // Mid range - circle and attack
+        if (Math.random() > 0.6 && !this.ai.cooldown) {
+          this.attack(this.ai, this.player);
+          this.ai.reactionTime = Phaser.Math.Between(4, 8);
+        } else {
+          // Circle around
+          const circleDir = Math.random() > 0.5 ? 1 : -1;
+          this.ai.setVelocityX(circleDir * 120);
+        }
+      } else {
+        // Far range - approach
+        this.ai.setVelocityX(this.ai.facing * 180);
+      }
+
+      // Jump logic - if player is above or random jump
+      const heightDiff = this.player.y - this.ai.y;
+      if (isGrounded) {
+        if (heightDiff < -50 || (Math.random() > 0.95 && distance < 200)) {
+          this.ai.setVelocityY(-500);
+        }
+      }
+
+      // Random pause in movement
+      if (Math.random() > 0.92) {
+        this.ai.setVelocityX(0);
+        this.ai.reactionTime = Phaser.Math.Between(2, 5);
+      }
+    }
+
+    attack(attacker, defender) {
+      if (attacker.cooldown || this.gameOver) return;
+      
+      attacker.cooldown = true;
+
+      const hitZone = new Phaser.Geom.Rectangle(
+        attacker.x + (attacker.facing * 30), 
+        attacker.y - 30, 
+        45, 
+        60
+      );
+      
+      const defBounds = defender.getBounds();
+
+      if (Phaser.Geom.Intersects.RectangleToRectangle(hitZone, defBounds)) {
+        defender.hp -= 1;
+        this.flashHit(defender);
+        
+        // Knockback
+        defender.setVelocityX(attacker.facing * 150);
+        defender.setVelocityY(-100);
+        
+        this.updateUI();
+        
+        if (defender.hp <= 0) {
+          this.declareWinner(attacker);
+        }
+      }
+
+      this.showPunchEffect(attacker);
+
+      this.time.delayedCall(400, () => {
+        if (attacker) attacker.cooldown = false;
+      });
+    }
+
+    showPunchEffect(attacker) {
+      const punchX = attacker.x + (attacker.facing * 35);
+      const punch = this.add.circle(punchX, attacker.y, 15, 0xffff00, 0.6);
+      this.tweens.add({
+        targets: punch,
+        alpha: 0,
+        scale: 1.5,
+        duration: 200,
+        onComplete: () => punch.destroy()
+      });
+    }
+
+    flashHit(target) {
+      target.setTint(0xff4444);
+      this.time.delayedCall(200, () => {
+        if (target) target.clearTint();
+      });
+    }
+
+    createUI() {
+      this.hpText1 = this.add.text(20, 20, 'PLAYER: ♥♥♥♥♥', { 
+        fontFamily: 'monospace', 
+        fontSize: 18, 
+        color: '#33aaff' 
+      }).setScrollFactor(0);
+      
+      this.hpText2 = this.add.text(this.scale.width - 160, 20, 'AI: ♥♥♥♥♥', { 
+        fontFamily: 'monospace', 
+        fontSize: 18, 
+        color: '#ff5566' 
+      }).setScrollFactor(0);
+    }
+
+    updateUI() {
+      const hearts1 = '♥'.repeat(Math.max(0, this.player.hp));
+      const hearts2 = '♥'.repeat(Math.max(0, this.ai.hp));
+      
+      this.hpText1.setText('PLAYER: ' + hearts1);
+      this.hpText2.setText('AI: ' + hearts2);
+    }
+
+    declareWinner(winner) {
+      this.gameOver = true;
+      this.physics.pause();
+      
+      if (this.aiTimer) {
+        this.aiTimer.remove();
+      }
+      
+      const winnerName = winner === this.player ? 'You Win!' : 'AI Wins!';
+      const winnerColor = winner === this.player ? '#33aaff' : '#ff5566';
+      
+      this.add.text(
+        this.scale.width / 2, 
+        this.scale.height / 2 - 40, 
+        winnerName, 
+        {
+          fontFamily: 'monospace',
+          fontSize: 48,
+          color: winnerColor
+        }
+      ).setOrigin(0.5);
+      
+      this.add.text(
+        this.scale.width / 2, 
+        this.scale.height / 2 + 20, 
+        'K.O.', 
+        {
+          fontFamily: 'monospace',
+          fontSize: 32,
+          color: '#fff'
+        }
+      ).setOrigin(0.5);
+      
+      this.add.text(
+        this.scale.width / 2, 
+        this.scale.height / 2 + 70, 
+        'Click to Restart', 
+        {
+          fontFamily: 'monospace',
+          fontSize: 16,
+          color: '#ccc'
+        }
+      ).setOrigin(0.5);
+      
+      this.input.once('pointerdown', () => this.scene.restart());
+    }
+  }
+  </script>
+  <!-- REGION:SCENE_CLASS_END -->
+
+  <!-- REGION:CONFIG_START -->
+  <script>
+  const config = {
+    type: Phaser.AUTO,
+    width: 960,
+    height: 540,
+    backgroundColor: 0x202035,
+    physics: { 
+      default: 'arcade', 
+      arcade: { 
+        gravity: { y: 900 }, 
+        debug: false 
+      } 
+    },
+    scene: [FightScene]
+  };
+  </script>
+  <!-- REGION:CONFIG_END -->
+
+  <!-- REGION:GAME_INIT_START -->
+  <script>
+  window.onload = () => {
+    const game = new Phaser.Game(config);
+  };
+  </script>
+  <!-- REGION:GAME_INIT_END -->
+
+</body>
+</html>

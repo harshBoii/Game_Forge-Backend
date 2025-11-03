@@ -1,0 +1,523 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Survival / Defense - Phaser Template</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html,body { margin:0; padding:0; background:#222; height:100%; }
+    .hint { position: absolute; right: 12px; top: 12px; color:#ddd; font-family: monospace; font-size:13px; background: rgba(0,0,0,0.25); padding:8px; border-radius:6px; z-index: 1000;}
+  </style>
+</head>
+<body>
+  <div class="hint">Click to place turrets (costs 50 gold) • Defend base from enemies</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+
+  <!-- REGION:SCENE_CLASS_START -->
+  <script>
+  class DefenseScene extends Phaser.Scene {
+    constructor() { super('DefenseScene'); }
+    
+    preload() {
+      this.generateTextures();
+    }
+    
+    generateTextures() {
+      // Base texture
+      if (!this.textures.exists('base')) {
+        const g = this.add.graphics();
+        g.fillStyle(0x44cc44, 1);
+        g.fillRect(0, 0, 40, 120);
+        g.fillStyle(0x22aa22, 1);
+        g.fillRect(5, 10, 30, 100);
+        g.generateTexture('base', 40, 120);
+        g.destroy();
+      }
+
+      // Turret texture
+      if (!this.textures.exists('turret')) {
+        const g = this.add.graphics();
+        g.fillStyle(0x66aaff, 1);
+        g.fillCircle(12, 12, 12);
+        g.fillStyle(0x4488dd, 1);
+        g.fillCircle(12, 12, 7);
+        g.generateTexture('turret', 24, 24);
+        g.destroy();
+      }
+
+      // Bullet texture
+      if (!this.textures.exists('bullet')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xffff55, 1);
+        g.fillCircle(4, 4, 4);
+        g.generateTexture('bullet', 8, 8);
+        g.destroy();
+      }
+
+      // Enemy texture
+      if (!this.textures.exists('enemy')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xff4444, 1);
+        g.fillRect(0, 0, 30, 30);
+        g.fillStyle(0xaa2222, 1);
+        g.fillCircle(10, 10, 4);
+        g.fillCircle(20, 10, 4);
+        g.generateTexture('enemy', 30, 30);
+        g.destroy();
+      }
+    }
+    
+    create() {
+      this.enemies = this.physics.add.group();
+      this.turrets = this.physics.add.staticGroup();
+      this.bullets = this.physics.add.group({
+        defaultKey: 'bullet',
+        maxSize: 100
+      });
+
+      // Game state
+      this.state = 'SETUP'; // SETUP, SPAWNING, PLAYING, WAVE_COMPLETE, GAME_OVER
+      this.baseHealth = 10;
+      this.maxHealth = 10;
+      this.gold = 100;
+      this.score = 0;
+      this.wave = 1;
+      this.enemiesSpawned = 0;
+      this.enemiesKilled = 0;
+      this.turretCost = 50;
+      this.gameOverFlag = false;
+
+      this.createBase();
+      this.createUI();
+      this.startWaveTimer = 0;
+
+      this.input.on('pointerdown', this.placeTurret, this);
+      
+      this.physics.add.overlap(this.bullets, this.enemies, this.bulletHit, null, this);
+      this.physics.add.overlap(this.enemies, this.base, this.enemyReachedBase, null, this);
+
+      this.startWave();
+    }
+
+    update() {
+      if (this.gameOverFlag) return;
+
+      this.updateTurrets();
+      this.cleanupBullets();
+
+      // State machine
+      if (this.state === 'SPAWNING') {
+        // Spawning happens via timed events
+      } else if (this.state === 'PLAYING') {
+        // Check if wave is complete
+        if (this.enemiesSpawned > 0 && 
+            this.enemiesKilled === this.enemiesSpawned && 
+            this.enemies.countActive() === 0) {
+          this.completeWave();
+        }
+      } else if (this.state === 'WAVE_COMPLETE') {
+        this.startWaveTimer++;
+        if (this.startWaveTimer > 180) { // 3 seconds at 60fps
+          this.startWaveTimer = 0;
+          this.startWave();
+        }
+      }
+    }
+
+    createBase() {
+      this.base = this.add.sprite(this.scale.width - 40, this.scale.height / 2, 'base');
+      this.physics.add.existing(this.base, true);
+      this.base.body.setSize(40, 120);
+    }
+
+    placeTurret(pointer) {
+      // Can't place if not in PLAYING or SPAWNING state
+      if (this.state !== 'PLAYING' && this.state !== 'SPAWNING') return;
+      
+      // Check cost
+      if (this.gold < this.turretCost) {
+        this.showNotification('Not enough gold!', 0xff0000);
+        return;
+      }
+
+      // Prevent placing too close to base or outside bounds
+      if (pointer.x > this.scale.width - 120 || pointer.x < 50) {
+        this.showNotification('Invalid position!', 0xff0000);
+        return;
+      }
+      if (pointer.y < 50 || pointer.y > this.scale.height - 50) return;
+
+      // Check if turret already exists at this position
+      let canPlace = true;
+      this.turrets.children.entries.forEach(turret => {
+        const dist = Phaser.Math.Distance.Between(pointer.x, pointer.y, turret.x, turret.y);
+        if (dist < 50) canPlace = false;
+      });
+
+      if (!canPlace) {
+        this.showNotification('Too close to another turret!', 0xff0000);
+        return;
+      }
+
+      // Place turret
+      const turret = this.turrets.create(pointer.x, pointer.y, 'turret');
+      turret.body.setSize(20, 20);
+      turret.lastShot = 0;
+      turret.range = 140;
+      turret.fireRate = 500;
+      
+      this.gold -= this.turretCost;
+      this.updateUI();
+
+      // Visual feedback
+      this.tweens.add({
+        targets: turret,
+        scale: { from: 0.5, to: 1 },
+        duration: 300,
+        ease: 'Back.easeOut'
+      });
+
+      this.showNotification('Turret placed!', 0x00ff00);
+    }
+
+    updateTurrets() {
+      const now = this.time.now;
+      
+      this.turrets.children.entries.forEach(turret => {
+        if (!turret.active) return;
+
+        // Find closest enemy within range
+        let target = null;
+        let closestDist = turret.range;
+
+        this.enemies.children.entries.forEach(enemy => {
+          if (!enemy.active) return;
+          const dist = Phaser.Math.Distance.Between(turret.x, turret.y, enemy.x, enemy.y);
+          if (dist < closestDist) {
+            closestDist = dist;
+            target = enemy;
+          }
+        });
+
+        // Fire at target
+        if (target && now > turret.lastShot + turret.fireRate) {
+          this.fireBullet(turret, target);
+          turret.lastShot = now;
+          
+          // Visual effect
+          this.tweens.add({
+            targets: turret,
+            scale: 1.15,
+            duration: 80,
+            yoyo: true
+          });
+        }
+      });
+    }
+
+    fireBullet(turret, target) {
+      const bullet = this.bullets.get(turret.x, turret.y);
+      
+      if (bullet) {
+        bullet.setActive(true);
+        bullet.setVisible(true);
+        this.physics.moveToObject(bullet, target, 350);
+      }
+    }
+
+    cleanupBullets() {
+      this.bullets.children.entries.forEach(bullet => {
+        if (bullet.active && (bullet.x < -50 || bullet.x > this.scale.width + 50 || 
+                               bullet.y < -50 || bullet.y > this.scale.height + 50)) {
+          bullet.setActive(false);
+          bullet.setVisible(false);
+          bullet.body.stop();
+        }
+      });
+    }
+
+    startWave() {
+      this.state = 'SPAWNING';
+      const enemyCount = Math.floor(3 + this.wave * 2);
+      this.enemiesSpawned = 0;
+      this.enemiesKilled = 0;
+
+      this.waveText.setText(`Wave ${this.wave}`);
+      this.waveStatus.setText('Spawning...');
+
+      let spawnCount = 0;
+      this.time.addEvent({
+        delay: 800,
+        repeat: enemyCount - 1,
+        callback: () => {
+          spawnCount++;
+          this.spawnEnemy();
+          
+          if (spawnCount === enemyCount) {
+            this.state = 'PLAYING';
+            this.waveStatus.setText('In Progress');
+          }
+        }
+      });
+    }
+
+    spawnEnemy() {
+      const y = Phaser.Math.Between(80, this.scale.height - 80);
+      const enemy = this.enemies.create(10, y, 'enemy');
+      
+      const baseSpeed = 60 + this.wave * 8;
+      enemy.setVelocityX(baseSpeed);
+      enemy.hp = 1 + Math.floor((this.wave - 1) / 2);
+      enemy.maxHp = enemy.hp;
+      
+      this.enemiesSpawned++;
+    }
+
+    bulletHit(bullet, enemy) {
+      bullet.setActive(false);
+      bullet.setVisible(false);
+      bullet.body.stop();
+
+      enemy.hp -= 1;
+
+      // Visual feedback
+      enemy.setTint(0xff8888);
+      this.time.delayedCall(80, () => {
+        if (enemy.active) enemy.clearTint();
+      });
+
+      if (enemy.hp <= 0) {
+        const reward = 5 * this.wave;
+        this.gold += reward;
+        this.enemiesKilled++;
+        this.score += reward;
+        enemy.destroy();
+        this.updateUI();
+
+        // Gold popup
+        this.showGoldPopup(enemy.x, enemy.y, '+' + reward);
+      }
+    }
+
+    showGoldPopup(x, y, text) {
+      const popup = this.add.text(x, y, text, {
+        fontFamily: 'monospace',
+        fontSize: 20,
+        color: '#ffff00',
+        fontStyle: 'bold'
+      });
+
+      this.tweens.add({
+        targets: popup,
+        y: y - 40,
+        alpha: 0,
+        duration: 1000,
+        onComplete: () => popup.destroy()
+      });
+    }
+
+    showNotification(text, color) {
+      const notif = this.add.text(
+        this.scale.width / 2,
+        80,
+        text,
+        {
+          fontFamily: 'monospace',
+          fontSize: 18,
+          color: Phaser.Display.Color.IntegerToRGB(color).hexString()
+        }
+      ).setOrigin(0.5);
+
+      this.tweens.add({
+        targets: notif,
+        alpha: 0,
+        duration: 1500,
+        delay: 200,
+        onComplete: () => notif.destroy()
+      });
+    }
+
+    enemyReachedBase(base, enemy) {
+      enemy.destroy();
+      this.damageBase();
+    }
+
+    damageBase() {
+      this.baseHealth = Math.max(0, this.baseHealth - 1);
+      this.updateUI();
+      
+      // Visual feedback
+      this.tweens.add({
+        targets: this.base,
+        scaleX: 0.85,
+        duration: 100,
+        yoyo: true
+      });
+
+      this.showNotification('Base hit!', 0xff0000);
+
+      if (this.baseHealth <= 0) {
+        this.gameOver(false);
+      }
+    }
+
+    completeWave() {
+      this.state = 'WAVE_COMPLETE';
+      this.waveStatus.setText('Wave Complete!');
+
+      // Repair base
+      const oldHealth = this.baseHealth;
+      this.baseHealth = Math.min(this.maxHealth, this.baseHealth + 2);
+      
+      // Bonus gold
+      const bonus = 20 * this.wave;
+      this.gold += bonus;
+      this.score += bonus;
+      this.updateUI();
+
+      this.showNotification(`Wave ${this.wave} Complete! +${bonus} gold`, 0x00ff00);
+    }
+
+    createUI() {
+      // Top left info
+      this.waveText = this.add.text(16, 16, 'Wave 1', {
+        fontFamily: 'monospace',
+        fontSize: 24,
+        color: '#ffff00',
+        fontStyle: 'bold',
+        backgroundColor: '#000',
+        padding: { x: 12, y: 8 }
+      });
+
+      this.waveStatus = this.add.text(16, 50, 'Starting...', {
+        fontFamily: 'monospace',
+        fontSize: 16,
+        color: '#fff',
+        backgroundColor: '#000',
+        padding: { x: 8, y: 4 }
+      });
+
+      // Top right stats
+      this.healthText = this.add.text(this.scale.width - 250, 16, 'Base: 10/10 HP', {
+        fontFamily: 'monospace',
+        fontSize: 18,
+        color: '#44ff44',
+        backgroundColor: '#000',
+        padding: { x: 12, y: 8 }
+      }).setOrigin(1, 0);
+
+      this.goldText = this.add.text(this.scale.width - 250, 50, 'Gold: 100', {
+        fontFamily: 'monospace',
+        fontSize: 18,
+        color: '#ffff00',
+        backgroundColor: '#000',
+        padding: { x: 12, y: 8 }
+      }).setOrigin(1, 0);
+
+      // Bottom right score
+      this.scoreText = this.add.text(this.scale.width - 20, this.scale.height - 20, 'Score: 0', {
+        fontFamily: 'monospace',
+        fontSize: 16,
+        color: '#fff',
+        backgroundColor: '#000',
+        padding: { x: 8, y: 4 }
+      }).setOrigin(1, 1);
+
+      // Instructions
+      this.add.text(this.scale.width / 2, this.scale.height - 20, 'Click to place turrets (50 gold each)', {
+        fontFamily: 'monospace',
+        fontSize: 14,
+        color: '#aaa',
+        backgroundColor: '#000',
+        padding: { x: 8, y: 4 }
+      }).setOrigin(0.5, 1);
+    }
+
+    updateUI() {
+      this.healthText.setText(`Base: ${this.baseHealth}/${this.maxHealth} HP`);
+      this.goldText.setText(`Gold: ${this.gold}`);
+      this.scoreText.setText(`Score: ${this.score}`);
+    }
+
+    gameOver(win) {
+      this.gameOverFlag = true;
+      this.state = 'GAME_OVER';
+      this.physics.pause();
+
+      const msg = win ? 'Victory!' : 'Base Destroyed';
+      const color = win ? '#00ff00' : '#ff0000';
+
+      this.add.rectangle(this.scale.width / 2, this.scale.height / 2, 900, 600, 0x000000, 0.7);
+
+      this.add.text(
+        this.scale.width / 2,
+        this.scale.height / 2 - 80,
+        msg,
+        {
+          fontFamily: 'monospace',
+          fontSize: 56,
+          color: color,
+          fontStyle: 'bold'
+        }
+      ).setOrigin(0.5);
+
+      this.add.text(
+        this.scale.width / 2,
+        this.scale.height / 2,
+        `Final Score: ${this.score}\nWaves Survived: ${this.wave}`,
+        {
+          fontFamily: 'monospace',
+          fontSize: 28,
+          color: '#fff',
+          align: 'center'
+        }
+      ).setOrigin(0.5);
+
+      this.add.text(
+        this.scale.width / 2,
+        this.scale.height / 2 + 100,
+        'Click to Restart',
+        {
+          fontFamily: 'monospace',
+          fontSize: 18,
+          color: '#aaa'
+        }
+      ).setOrigin(0.5);
+
+      this.input.once('pointerdown', () => this.scene.restart());
+    }
+  }
+  </script>
+  <!-- REGION:SCENE_CLASS_END -->
+
+  <!-- REGION:CONFIG_START -->
+  <script>
+  const config = {
+    type: Phaser.AUTO,
+    width: 900,
+    height: 600,
+    backgroundColor: 0x111111,
+    physics: { 
+      default: 'arcade', 
+      arcade: { 
+        gravity: { y: 0 },
+        debug: false 
+      } 
+    },
+    scene: [DefenseScene]
+  };
+  </script>
+  <!-- REGION:CONFIG_END -->
+
+  <!-- REGION:GAME_INIT_START -->
+  <script>
+  window.onload = () => {
+    const game = new Phaser.Game(config);
+  };
+  </script>
+  <!-- REGION:GAME_INIT_END -->
+
+</body>
+</html>

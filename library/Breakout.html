@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Breakout - Phaser Template</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html,body { margin:0; padding:0; background:#111; height:100%; }
+    .hint { position: absolute; right: 12px; top: 12px; color:#ddd; font-family: monospace; font-size:13px; background: rgba(0,0,0,0.25); padding:8px; border-radius:6px; z-index: 1000;}
+  </style>
+</head>
+<body>
+  <div class="hint">← → or Mouse to move • SPACE to launch • Break all bricks</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+
+  <!-- REGION:SCENE_CLASS_START -->
+  <script>
+  class BreakoutScene extends Phaser.Scene {
+    constructor() { super('BreakoutScene'); }
+    
+    preload() {
+      this.generateTextures();
+    }
+    
+    generateTextures() {
+      // Paddle texture
+      if (!this.textures.exists('paddle')) {
+        const g = this.add.graphics();
+        g.fillStyle(0x55aaff, 1);
+        g.fillRoundedRect(0, 0, 100, 20, 4);
+        g.generateTexture('paddle', 100, 20);
+        g.destroy();
+      }
+
+      // Ball texture
+      if (!this.textures.exists('ball')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xffee55, 1);
+        g.fillCircle(8, 8, 8);
+        g.generateTexture('ball', 16, 16);
+        g.destroy();
+      }
+
+      // Brick texture
+      if (!this.textures.exists('brick')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xcccccc, 1);
+        g.fillRoundedRect(0, 0, 60, 25, 3);
+        g.generateTexture('brick', 60, 25);
+        g.destroy();
+      }
+    }
+    
+    create() {
+      // Game state
+      this.state = 'READY'; // READY, PLAYING, LOST, WON, LEVEL_UP
+      this.level = 1;
+      this.lives = 3;
+      this.score = 0;
+      this.totalBricksDestroyed = 0;
+
+      this.createBricks();
+      this.createPaddle();
+      this.createBall();
+      this.createUI();
+
+      this.cursors = this.input.keyboard.createCursorKeys();
+      this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+
+      // Mouse control
+      this.input.on('pointermove', (pointer) => {
+        this.paddle.x = Phaser.Math.Clamp(pointer.x, 50, this.scale.width - 50);
+        if (this.ball.getData('onPaddle')) {
+          this.ball.x = this.paddle.x;
+        }
+      });
+
+      this.physics.add.collider(this.ball, this.bricks, this.hitBrick, null, this);
+      this.physics.add.collider(this.ball, this.paddle, this.hitPaddle, null, this);
+    }
+
+    update() {
+      if (this.state === 'READY') {
+        // Ball follows paddle
+        this.ball.x = this.paddle.x;
+        this.ball.y = this.paddle.y - 25;
+
+        // Keyboard paddle control
+        if (this.cursors.left.isDown) {
+          this.paddle.setVelocityX(-400);
+        } else if (this.cursors.right.isDown) {
+          this.paddle.setVelocityX(400);
+        } else {
+          this.paddle.setVelocityX(0);
+        }
+
+        // Launch ball with SPACE
+        if (this.spaceKey.isDown) {
+          this.ball.setVelocity(
+            Phaser.Math.Between(-150, 150),
+            -300
+          );
+          this.ball.setData('onPaddle', false);
+          this.state = 'PLAYING';
+          this.launchText.setVisible(false);
+        }
+      } else if (this.state === 'PLAYING') {
+        // Keyboard paddle control
+        if (this.cursors.left.isDown) {
+          this.paddle.setVelocityX(-400);
+        } else if (this.cursors.right.isDown) {
+          this.paddle.setVelocityX(400);
+        } else {
+          this.paddle.setVelocityX(0);
+        }
+
+        // Ball falls off screen
+        if (this.ball.y > 600) {
+          this.loseLife();
+        }
+      }
+    }
+
+    createPaddle() {
+      this.paddle = this.physics.add.sprite(this.scale.width / 2, 560, 'paddle');
+      this.paddle.setImmovable(true);
+      this.paddle.setCollideWorldBounds(true);
+      this.paddle.body.allowGravity = false;
+    }
+
+    createBall() {
+      this.ball = this.physics.add.sprite(this.scale.width / 2, 520, 'ball');
+      this.ball.setCollideWorldBounds(true);
+      this.ball.setBounce(1, 1);
+      this.ball.setData('onPaddle', true);
+    }
+
+    createBricks() {
+      this.bricks = this.physics.add.staticGroup();
+      const colors = [0xff5555, 0xffaa55, 0xffff55, 0x55ffaa, 0x55aaff];
+      
+      const bricksPerRow = 10;
+      const brickRows = 3 + Math.floor(this.level / 2);
+      const totalBricks = bricksPerRow * brickRows;
+
+      let brickCount = 0;
+      for (let y = 0; y < brickRows; y++) {
+        for (let x = 0; x < bricksPerRow; x++) {
+          const color = colors[y % colors.length];
+          const brick = this.bricks.create(70 + x * 70, 60 + y * 35, 'brick');
+          
+          // Color tint
+          brick.setTint(color);
+          brick.brickValue = 10 * (y + 1); // More points for lower bricks
+        }
+      }
+    }
+
+    hitBrick(ball, brick) {
+      brick.destroy();
+      this.score += brick.brickValue;
+      this.totalBricksDestroyed++;
+      this.scoreText.setText('Score: ' + this.score);
+
+      // Visual effect
+      const explosion = this.add.circle(brick.x, brick.y, 15, brick.tint, 0.8);
+      this.tweens.add({
+        targets: explosion,
+        alpha: 0,
+        scale: 2,
+        duration: 300,
+        onComplete: () => explosion.destroy()
+      });
+
+      // Check level completion
+      if (this.bricks.countActive() === 0) {
+        this.levelComplete();
+      }
+    }
+
+    hitPaddle(ball, paddle) {
+      // Calculate angle based on where ball hits paddle
+      let diff = ball.x - paddle.x;
+      
+      if (Math.abs(diff) < 5) {
+        // Ball near center - bounce straight up with slight variation
+        ball.setVelocityX(Phaser.Math.Between(-50, 50));
+        ball.setVelocityY(-Math.abs(ball.body.velocity.y));
+      } else {
+        // Ball on side - bounce at angle
+        diff = Phaser.Math.Clamp(diff, -50, 50);
+        ball.setVelocityX(diff * 6);
+        ball.setVelocityY(-Math.abs(ball.body.velocity.y));
+      }
+
+      // Speed up slightly
+      const speed = Math.sqrt(
+        ball.body.velocity.x ** 2 + ball.body.velocity.y ** 2
+      );
+      const maxSpeed = 300 + this.level * 20;
+      if (speed > maxSpeed) {
+        const scale = maxSpeed / speed;
+        ball.setVelocity(
+          ball.body.velocity.x * scale,
+          ball.body.velocity.y * scale
+        );
+      }
+    }
+
+    loseLife() {
+      this.lives--;
+      this.livesText.setText('Lives: ' + this.lives);
+
+      if (this.lives <= 0) {
+        this.gameOver(false);
+      } else {
+        this.state = 'READY';
+        this.launchText.setVisible(true);
+        this.ball.setVelocity(0);
+        this.ball.setData('onPaddle', true);
+      }
+    }
+
+    levelComplete() {
+      this.state = 'LEVEL_UP';
+      this.physics.pause();
+
+      const bonus = 100 * this.level;
+      this.score += bonus;
+
+      this.add.text(
+        this.scale.width / 2,
+        this.scale.height / 2,
+        `Level ${this.level} Complete!\n\n+${bonus} Bonus\n\nClick to continue`,
+        {
+          fontFamily: 'monospace',
+          fontSize: 28,
+          color: '#ffff00',
+          align: 'center',
+          backgroundColor: '#000',
+          padding: { x: 20, y: 20 }
+        }
+      ).setOrigin(0.5);
+
+      this.input.once('pointerdown', () => {
+        this.level++;
+        this.scene.restart();
+      });
+    }
+
+    gameOver(win) {
+      this.state = 'GAME_OVER';
+      this.physics.pause();
+
+      const msg = win ? 'Victory!' : 'Game Over';
+      const color = win ? '#00ff00' : '#ff0000';
+
+      this.add.rectangle(this.scale.width / 2, this.scale.height / 2, 800, 600, 0x000000, 0.8);
+
+      this.add.text(
+        this.scale.width / 2,
+        this.scale.height / 2 - 80,
+        msg,
+        {
+          fontFamily: 'monospace',
+          fontSize: 56,
+          color: color,
+          fontStyle: 'bold'
+        }
+      ).setOrigin(0.5);
+
+      this.add.text(
+        this.scale.width / 2,
+        this.scale.height / 2,
+        `Score: ${this.score}\nLevel: ${this.level}\nBricks Destroyed: ${this.totalBricksDestroyed}`,
+        {
+          fontFamily: 'monospace',
+          fontSize: 24,
+          color: '#fff',
+          align: 'center'
+        }
+      ).setOrigin(0.5);
+
+      this.add.text(
+        this.scale.width / 2,
+        this.scale.height / 2 + 100,
+        'Click to Restart',
+        {
+          fontFamily: 'monospace',
+          fontSize: 18,
+          color: '#aaa'
+        }
+      ).setOrigin(0.5);
+
+      this.input.once('pointerdown', () => {
+        this.level = 1;
+        this.lives = 3;
+        this.score = 0;
+        this.totalBricksDestroyed = 0;
+        this.scene.restart();
+      });
+    }
+
+    createUI() {
+      this.scoreText = this.add.text(16, 16, 'Score: 0', {
+        fontFamily: 'monospace',
+        fontSize: 20,
+        color: '#fff',
+        backgroundColor: '#000',
+        padding: { x: 12, y: 8 }
+      });
+
+      this.livesText = this.add.text(16, 50, 'Lives: 3', {
+        fontFamily: 'monospace',
+        fontSize: 20,
+        color: '#ff5555',
+        backgroundColor: '#000',
+        padding: { x: 12, y: 8 }
+      });
+
+      this.add.text(this.scale.width - 20, 16, `Level: ${this.level}`, {
+        fontFamily: 'monospace',
+        fontSize: 20,
+        color: '#ffff00',
+        backgroundColor: '#000',
+        padding: { x: 12, y: 8 }
+      }).setOrigin(1, 0);
+
+      this.launchText = this.add.text(
+        this.scale.width / 2,
+        this.scale.height - 40,
+        'Press SPACE to Launch',
+        {
+          fontFamily: 'monospace',
+          fontSize: 18,
+          color: '#55ff55',
+          backgroundColor: '#000',
+          padding: { x: 12, y: 8 }
+        }
+      ).setOrigin(0.5);
+    }
+  }
+  </script>
+  <!-- REGION:SCENE_CLASS_END -->
+
+  <!-- REGION:CONFIG_START -->
+  <script>
+  const config = {
+    type: Phaser.AUTO,
+    width: 800,
+    height: 600,
+    backgroundColor: 0x000000,
+    physics: {
+      default: 'arcade',
+      arcade: {
+        gravity: { y: 0 },
+        debug: false
+      }
+    },
+    scene: [BreakoutScene]
+  };
+  </script>
+  <!-- REGION:CONFIG_END -->
+
+  <!-- REGION:GAME_INIT_START -->
+  <script>
+  window.onload = () => {
+    const game = new Phaser.Game(config);
+  };
+  </script>
+  <!-- REGION:GAME_INIT_END -->
+
+</body>
+</html>

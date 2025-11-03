@@ -1,0 +1,332 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Space Shooter - Phaser Template</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html,body { margin:0; padding:0; background:#000; height:100%; }
+    .hint { position: absolute; right: 12px; top: 12px; color:#ddd; font-family: monospace; font-size:13px; background: rgba(0,0,0,0.25); padding:8px; border-radius:6px; z-index: 1000;}
+  </style>
+</head>
+<body>
+  <div class="hint">← → to move • SPACE to shoot</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+
+  <!-- REGION:SCENE_CLASS_START -->
+  <script>
+  class SpaceScene extends Phaser.Scene {
+    constructor() { super('SpaceScene'); }
+    
+    preload() {
+      this.generateTextures();
+    }
+    
+    generateTextures() {
+      // Player ship texture
+      if (!this.textures.exists('ship')) {
+        const g = this.add.graphics();
+        g.fillStyle(0x00aaff, 1);
+        g.fillTriangle(20, 0, 40, 40, 0, 40);
+        g.generateTexture('ship', 40, 40);
+        g.destroy();
+      }
+
+      // Bullet texture
+      if (!this.textures.exists('bullet')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xffff66, 1);
+        g.fillCircle(4, 4, 4);
+        g.generateTexture('bullet', 8, 8);
+        g.destroy();
+      }
+
+      // Enemy texture
+      if (!this.textures.exists('enemy')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xff4444, 1);
+        g.fillRect(0, 0, 32, 24);
+        g.fillStyle(0xaa2222, 1);
+        g.fillCircle(8, 8, 4);
+        g.fillCircle(24, 8, 4);
+        g.generateTexture('enemy', 32, 24);
+        g.destroy();
+      }
+    }
+    
+    create() {
+      this.createPlayer();
+      this.createEnemies();
+      this.createUI();
+
+      this.cursors = this.input.keyboard.createCursorKeys();
+      this.keys = this.input.keyboard.addKeys('SPACE');
+
+      // Object pooling for bullets
+      this.bullets = this.physics.add.group({
+        defaultKey: 'bullet',
+        maxSize: 30
+      });
+      
+      this.lastFired = 0;
+      this.fireRate = 250;
+
+      this.physics.add.overlap(this.bullets, this.enemies, this.hitEnemy, null, this);
+      this.physics.add.overlap(this.player, this.enemies, this.hitPlayer, null, this);
+      
+      this.gameOver = false;
+      this.lives = 3;
+    }
+
+    update(time) {
+      if (this.gameOver) return;
+
+      this.updatePlayer();
+      this.updateEnemies();
+      this.cleanupBullets();
+      
+      if (this.keys.SPACE.isDown && time > this.lastFired + this.fireRate) {
+        this.shootBullet();
+        this.lastFired = time;
+      }
+    }
+
+    createPlayer() {
+      this.player = this.physics.add.sprite(400, 550, 'ship');
+      this.player.setCollideWorldBounds(true);
+      this.player.body.setSize(32, 32).setOffset(4, 4);
+      this.player.speed = 300;
+    }
+
+    updatePlayer() {
+      const p = this.player;
+      
+      if (this.cursors.left.isDown) {
+        p.setVelocityX(-p.speed);
+      } else if (this.cursors.right.isDown) {
+        p.setVelocityX(p.speed);
+      } else {
+        p.setVelocityX(0);
+      }
+    }
+
+    shootBullet() {
+      // Get bullet from pool or create new one
+      const bullet = this.bullets.get(this.player.x, this.player.y - 20);
+      
+      if (bullet) {
+        bullet.setActive(true);
+        bullet.setVisible(true);
+        bullet.setVelocityY(-400);
+        bullet.body.setSize(6, 6);
+      }
+    }
+
+    cleanupBullets() {
+      // Remove bullets that go off screen
+      this.bullets.children.entries.forEach(bullet => {
+        if (bullet.active && bullet.y < -10) {
+          bullet.setActive(false);
+          bullet.setVisible(false);
+          bullet.body.stop();
+        }
+      });
+    }
+
+    createEnemies() {
+      this.enemies = this.physics.add.group();
+      this.enemyDirection = 1;
+      this.enemySpeed = 30;
+      
+      for (let y = 0; y < 4; y++) {
+        for (let x = 0; x < 8; x++) {
+          const enemy = this.enemies.create(
+            100 + x * 80, 
+            80 + y * 50, 
+            'enemy'
+          );
+          enemy.body.setSize(28, 20).setOffset(2, 2);
+        }
+      }
+      
+      // Set initial group velocity
+      this.enemies.setVelocityX(this.enemySpeed * this.enemyDirection);
+    }
+
+    updateEnemies() {
+      if (this.enemies.countActive() === 0) return;
+
+      let changeDirection = false;
+      
+      this.enemies.children.entries.forEach(enemy => {
+        if (!enemy.active) return;
+        
+        // Check if any enemy hit the edge
+        if ((enemy.x >= 780 && this.enemyDirection > 0) || 
+            (enemy.x <= 20 && this.enemyDirection < 0)) {
+          changeDirection = true;
+        }
+      });
+      
+      if (changeDirection) {
+        this.enemyDirection *= -1;
+        this.enemies.children.entries.forEach(enemy => {
+          if (enemy.active) {
+            enemy.y += 10; // Move down
+            enemy.body.velocity.x = this.enemySpeed * this.enemyDirection;
+            
+            // Check if enemies reached player level
+            if (enemy.y > 500) {
+              this.showGameOver(false);
+            }
+          }
+        });
+      }
+    }
+
+    hitEnemy(bullet, enemy) {
+      // Deactivate bullet (return to pool)
+      bullet.setActive(false);
+      bullet.setVisible(false);
+      bullet.body.stop();
+      
+      // Destroy enemy
+      enemy.destroy();
+      
+      // Update score
+      this.score += 10;
+      this.scoreText.setText('Score: ' + this.score);
+      
+      // Create explosion effect
+      const explosion = this.add.circle(enemy.x, enemy.y, 20, 0xff8800, 0.8);
+      this.tweens.add({
+        targets: explosion,
+        alpha: 0,
+        scale: 2,
+        duration: 300,
+        onComplete: () => explosion.destroy()
+      });
+      
+      // Check win condition
+      if (this.enemies.countActive() === 0) {
+        this.showGameOver(true);
+      }
+    }
+
+    hitPlayer(player, enemy) {
+      if (this.gameOver) return;
+      
+      enemy.destroy();
+      this.lives--;
+      this.livesText.setText('Lives: ' + this.lives);
+      
+      // Flash player
+      player.setTint(0xff0000);
+      this.time.delayedCall(200, () => {
+        if (this.player) this.player.clearTint();
+      });
+      
+      // Check game over
+      if (this.lives <= 0) {
+        this.showGameOver(false);
+      }
+    }
+
+    createUI() {
+      this.score = 0;
+      this.scoreText = this.add.text(16, 16, 'Score: 0', {
+        fontFamily: 'monospace',
+        fontSize: 20,
+        color: '#fff',
+        backgroundColor: '#000',
+        padding: { x: 8, y: 4 }
+      });
+      
+      this.livesText = this.add.text(16, 48, 'Lives: 3', {
+        fontFamily: 'monospace',
+        fontSize: 20,
+        color: '#fff',
+        backgroundColor: '#000',
+        padding: { x: 8, y: 4 }
+      });
+    }
+
+    showGameOver(win) {
+      this.gameOver = true;
+      this.physics.pause();
+      
+      const msg = win ? 'Victory!' : 'Game Over';
+      const color = win ? '#00ff00' : '#ff0000';
+      
+      this.add.text(
+        400, 
+        250, 
+        msg, 
+        {
+          fontFamily: 'monospace',
+          fontSize: 48,
+          color: color,
+          stroke: '#000',
+          strokeThickness: 6
+        }
+      ).setOrigin(0.5);
+      
+      this.add.text(
+        400, 
+        320, 
+        `Final Score: ${this.score}`, 
+        {
+          fontFamily: 'monospace',
+          fontSize: 24,
+          color: '#fff'
+        }
+      ).setOrigin(0.5);
+      
+      this.add.text(
+        400, 
+        370, 
+        'Click to Restart', 
+        {
+          fontFamily: 'monospace',
+          fontSize: 18,
+          color: '#ccc'
+        }
+      ).setOrigin(0.5);
+      
+      this.input.once('pointerdown', () => this.scene.restart());
+    }
+  }
+  </script>
+  <!-- REGION:SCENE_CLASS_END -->
+
+  <!-- REGION:CONFIG_START -->
+  <script>
+  const config = {
+    type: Phaser.AUTO,
+    width: 800,
+    height: 600,
+    backgroundColor: 0x000000,
+    physics: { 
+      default: 'arcade', 
+      arcade: { 
+        gravity: { y: 0 },
+        debug: false 
+      } 
+    },
+    scene: [SpaceScene]
+  };
+  </script>
+  <!-- REGION:CONFIG_END -->
+
+  <!-- REGION:GAME_INIT_START -->
+  <script>
+  window.onload = () => {
+    const game = new Phaser.Game(config);
+  };
+  </script>
+  <!-- REGION:GAME_INIT_END -->
+
+</body>
+</html>

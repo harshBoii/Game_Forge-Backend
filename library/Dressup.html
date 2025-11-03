@@ -1,0 +1,386 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Dress-Up Game - Phaser Template</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html,body { margin:0; padding:0; background:#fce4ec; height:100%; }
+    .hint { position:absolute; right:12px; top:12px; color:#333; font-family:monospace; font-size:13px; background:rgba(255,255,255,0.8); padding:8px; border-radius:6px; z-index: 1000;}
+  </style>
+</head>
+<body>
+  <div class="hint">Click options to customize outfit 💄✨</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+
+  <!-- REGION:SCENE_CLASS_START -->
+  <script>
+  class DressUpScene extends Phaser.Scene {
+    constructor() { super('DressUpScene'); }
+    
+    preload() {
+      this.generateTextures();
+    }
+    
+    generateTextures() {
+      // Button textures
+      if (!this.textures.exists('button')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xffffff, 1);
+        g.fillRoundedRect(0, 0, 140, 35, 4);
+        g.lineStyle(2, 0xc2185b);
+        g.strokeRoundedRect(0, 0, 140, 35, 4);
+        g.generateTexture('button', 140, 35);
+        g.destroy();
+      }
+
+      if (!this.textures.exists('buttonActive')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xffc0cb, 1);
+        g.fillRoundedRect(0, 0, 140, 35, 4);
+        g.lineStyle(3, 0xc2185b);
+        g.strokeRoundedRect(0, 0, 140, 35, 4);
+        g.generateTexture('buttonActive', 140, 35);
+        g.destroy();
+      }
+    }
+    
+    create() {
+      // Game state
+      this.outfit = {
+        skinColor: 0xffdbac,
+        hairColor: 0x8b4513,
+        hairStyle: 'short',
+        dressColor: 0xff69b4,
+        dressStyle: 'formal',
+        accessoryColor: 0xffdd00,
+        accessoryType: 'earring'
+      };
+
+      this.createCharacter();
+      this.createUI();
+      this.updateCharacterDisplay();
+    }
+
+    update() {}
+
+    createCharacter() {
+      this.characterGroup = this.add.container(400, 280);
+
+      // Skin/body
+      this.body = this.add.circle(0, 50, 45, this.outfit.skinColor);
+      this.characterGroup.add(this.body);
+
+      // Head
+      this.head = this.add.circle(0, -20, 35, this.outfit.skinColor);
+      this.characterGroup.add(this.head);
+
+      // Hair
+      this.hair = this.add.graphics();
+      this.characterGroup.add(this.hair);
+
+      // Eyes
+      this.eyes = this.add.text(0, -25, '👀', { fontSize: 24 }).setOrigin(0.5);
+      this.characterGroup.add(this.eyes);
+
+      // Dress
+      this.dress = this.add.graphics();
+      this.characterGroup.add(this.dress);
+
+      // Accessories
+      this.accessoryGroup = this.add.container(0, -50);
+      this.characterGroup.add(this.accessoryGroup);
+    }
+
+    updateCharacterDisplay() {
+      // Update hair
+      this.hair.clear();
+      this.hair.fillStyle(this.outfit.hairColor, 1);
+      if (this.outfit.hairStyle === 'short') {
+        this.hair.fillCircle(-15, -50, 18);
+        this.hair.fillCircle(15, -50, 18);
+      } else if (this.outfit.hairStyle === 'long') {
+        this.hair.fillEllipse(0, -40, 50, 60);
+      } else if (this.outfit.hairStyle === 'curly') {
+        this.hair.fillCircle(-10, -55, 12);
+        this.hair.fillCircle(10, -55, 12);
+        this.hair.fillCircle(0, -50, 15);
+      }
+
+      // Update dress
+      this.dress.clear();
+      this.dress.fillStyle(this.outfit.dressColor, 1);
+      if (this.outfit.dressStyle === 'casual') {
+        this.dress.fillRect(-30, 30, 60, 80);
+      } else if (this.outfit.dressStyle === 'formal') {
+        this.dress.fillRect(-35, 30, 70, 100);
+        this.dress.fillTriangle(-35, 30, -50, 90, -35, 90);
+        this.dress.fillTriangle(35, 30, 50, 90, 35, 90);
+      } else if (this.outfit.dressStyle === 'sporty') {
+        this.dress.fillRoundedRect(-28, 30, 56, 70, 4);
+      }
+
+      // Update accessory
+      this.accessoryGroup.removeAll(true);
+      this.drawAccessory();
+    }
+
+    drawAccessory() {
+      if (this.outfit.accessoryType === 'earring') {
+        const earring1 = this.add.circle(-25, 5, 8, this.outfit.accessoryColor);
+        const earring2 = this.add.circle(25, 5, 8, this.outfit.accessoryColor);
+        this.accessoryGroup.add([earring1, earring2]);
+      } else if (this.outfit.accessoryType === 'necklace') {
+        const necklace = this.add.graphics();
+        necklace.lineStyle(3, this.outfit.accessoryColor);
+        necklace.arc(0, 40, 30, Math.PI, 0, false);
+        this.accessoryGroup.add(necklace);
+      } else if (this.outfit.accessoryType === 'crown') {
+        const crown = this.add.graphics();
+        crown.fillStyle(this.outfit.accessoryColor, 1);
+        crown.fillTriangle(-15, -5, -5, -20, 0, 0);
+        crown.fillTriangle(0, -15, 10, -25, 15, -10);
+        crown.fillCircle(-15, 0, 4);
+        crown.fillCircle(15, 0, 4);
+        this.accessoryGroup.add(crown);
+      }
+    }
+
+    createUI() {
+      // Title
+      this.add.text(400, 20, '✨ Dress-Up Creator ✨', {
+        fontFamily: 'monospace',
+        fontSize: 28,
+        color: '#c2185b',
+        fontStyle: 'bold',
+        align: 'center'
+      }).setOrigin(0.5);
+
+      let yPos = 120;
+
+      // Hair options
+      this.add.text(50, yPos, 'Hair:', {
+        fontFamily: 'monospace',
+        fontSize: 16,
+        color: '#333',
+        fontStyle: 'bold'
+      });
+
+      this.hairButtons = [];
+      const hairStyles = ['short', 'long', 'curly'];
+      hairStyles.forEach((style, i) => {
+        const btn = this.add.text(50 + i * 150, yPos + 30, '→ ' + style.toUpperCase(), {
+          fontFamily: 'monospace',
+          fontSize: 14,
+          color: '#333',
+          backgroundColor: '#fff',
+          padding: { x: 8, y: 4 }
+        }).setInteractive();
+
+        btn.on('pointerdown', () => {
+          this.outfit.hairStyle = style;
+          this.updateCharacterDisplay();
+          this.updateButtonStates();
+        });
+
+        btn.on('pointerover', () => btn.setBackgroundColor('#ffc0cb'));
+        btn.on('pointerout', () => {
+          const color = this.outfit.hairStyle === style ? '#ffb6db' : '#fff';
+          btn.setBackgroundColor(color);
+        });
+
+        this.hairButtons.push(btn);
+      });
+
+      yPos += 70;
+
+      // Hair color
+      this.add.text(50, yPos, 'Hair Color:', {
+        fontFamily: 'monospace',
+        fontSize: 16,
+        color: '#333',
+        fontStyle: 'bold'
+      });
+
+      this.hairColorButtons = [];
+      const hairColors = [0x8b4513, 0x000000, 0xff6b9d, 0xffdd00, 0x4caf50];
+      hairColors.forEach((color, i) => {
+        const btn = this.add.circle(50 + i * 50, yPos + 30, 15, color);
+        btn.setInteractive().on('pointerdown', () => {
+          this.outfit.hairColor = color;
+          this.updateCharacterDisplay();
+          this.updateColorButtons();
+        });
+        this.hairColorButtons.push(btn);
+      });
+
+      yPos += 60;
+
+      // Dress style
+      this.add.text(50, yPos, 'Dress:', {
+        fontFamily: 'monospace',
+        fontSize: 16,
+        color: '#333',
+        fontStyle: 'bold'
+      });
+
+      this.dressButtons = [];
+      const dressStyles = ['casual', 'formal', 'sporty'];
+      dressStyles.forEach((style, i) => {
+        const btn = this.add.text(50 + i * 150, yPos + 30, '→ ' + style.toUpperCase(), {
+          fontFamily: 'monospace',
+          fontSize: 14,
+          color: '#333',
+          backgroundColor: '#fff',
+          padding: { x: 8, y: 4 }
+        }).setInteractive();
+
+        btn.on('pointerdown', () => {
+          this.outfit.dressStyle = style;
+          this.updateCharacterDisplay();
+          this.updateButtonStates();
+        });
+
+        btn.on('pointerover', () => btn.setBackgroundColor('#ffc0cb'));
+        btn.on('pointerout', () => {
+          const color = this.outfit.dressStyle === style ? '#ffb6db' : '#fff';
+          btn.setBackgroundColor(color);
+        });
+
+        this.dressButtons.push(btn);
+      });
+
+      yPos += 70;
+
+      // Dress color
+      this.add.text(50, yPos, 'Dress Color:', {
+        fontFamily: 'monospace',
+        fontSize: 16,
+        color: '#333',
+        fontStyle: 'bold'
+      });
+
+      this.dressColorButtons = [];
+      const dressColors = [0xff69b4, 0x9c27b0, 0x2196f3, 0xff9800, 0x4caf50];
+      dressColors.forEach((color, i) => {
+        const btn = this.add.circle(50 + i * 50, yPos + 30, 15, color);
+        btn.setInteractive().on('pointerdown', () => {
+          this.outfit.dressColor = color;
+          this.updateCharacterDisplay();
+          this.updateColorButtons();
+        });
+        this.dressColorButtons.push(btn);
+      });
+
+      yPos += 60;
+
+      // Accessory
+      this.add.text(50, yPos, 'Accessory:', {
+        fontFamily: 'monospace',
+        fontSize: 16,
+        color: '#333',
+        fontStyle: 'bold'
+      });
+
+      this.accessoryButtons = [];
+      const accessories = ['earring', 'necklace', 'crown'];
+      accessories.forEach((acc, i) => {
+        const btn = this.add.text(50 + i * 150, yPos + 30, '→ ' + acc.toUpperCase(), {
+          fontFamily: 'monospace',
+          fontSize: 14,
+          color: '#333',
+          backgroundColor: '#fff',
+          padding: { x: 8, y: 4 }
+        }).setInteractive();
+
+        btn.on('pointerdown', () => {
+          this.outfit.accessoryType = acc;
+          this.updateCharacterDisplay();
+          this.updateButtonStates();
+        });
+
+        btn.on('pointerover', () => btn.setBackgroundColor('#ffc0cb'));
+        btn.on('pointerout', () => {
+          const color = this.outfit.accessoryType === acc ? '#ffb6db' : '#fff';
+          btn.setBackgroundColor(color);
+        });
+
+        this.accessoryButtons.push(btn);
+      });
+
+      yPos += 70;
+
+      // Accessory color
+      this.add.text(50, yPos, 'Accessory Color:', {
+        fontFamily: 'monospace',
+        fontSize: 16,
+        color: '#333',
+        fontStyle: 'bold'
+      });
+
+      this.accessoryColorButtons = [];
+      const accColors = [0xffdd00, 0xff69b4, 0x00bcd4, 0x4caf50, 0xff6f00];
+      accColors.forEach((color, i) => {
+        const btn = this.add.circle(50 + i * 50, yPos + 30, 15, color);
+        btn.setInteractive().on('pointerdown', () => {
+          this.outfit.accessoryColor = color;
+          this.updateCharacterDisplay();
+          this.updateColorButtons();
+        });
+        this.accessoryColorButtons.push(btn);
+      });
+
+      this.updateButtonStates();
+    }
+
+    updateButtonStates() {
+      // Hair style buttons
+      this.hairButtons.forEach((btn, i) => {
+        const isActive = ['short', 'long', 'curly'][i] === this.outfit.hairStyle;
+        btn.setBackgroundColor(isActive ? '#ffb6db' : '#fff');
+      });
+
+      // Dress style buttons
+      this.dressButtons.forEach((btn, i) => {
+        const isActive = ['casual', 'formal', 'sporty'][i] === this.outfit.dressStyle;
+        btn.setBackgroundColor(isActive ? '#ffb6db' : '#fff');
+      });
+
+      // Accessory buttons
+      this.accessoryButtons.forEach((btn, i) => {
+        const isActive = ['earring', 'necklace', 'crown'][i] === this.outfit.accessoryType;
+        btn.setBackgroundColor(isActive ? '#ffb6db' : '#fff');
+      });
+    }
+
+    updateColorButtons() {
+      // Update all color button states for visual feedback
+    }
+  }
+  </script>
+  <!-- REGION:SCENE_CLASS_END -->
+
+  <!-- REGION:CONFIG_START -->
+  <script>
+  const config = {
+    type: Phaser.AUTO,
+    width: 800,
+    height: 600,
+    backgroundColor: 0xfce4ec,
+    scene: [DressUpScene]
+  };
+  </script>
+  <!-- REGION:CONFIG_END -->
+
+  <!-- REGION:GAME_INIT_START -->
+  <script>
+  window.onload = () => {
+    const game = new Phaser.Game(config);
+  };
+  </script>
+  <!-- REGION:GAME_INIT_END -->
+
+</body>
+</html>

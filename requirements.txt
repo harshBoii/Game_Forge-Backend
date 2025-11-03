@@ -8,3 +8,4 @@ pydantic
 httpx
 starlette
 langchain_openai
+langchain_anthropic

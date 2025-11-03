@@ -1,0 +1,312 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Idle / Incremental - Phaser Template</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html,body { margin:0; padding:0; background:#111; height:100%; font-family: monospace; }
+    .hint { position:absolute; right:12px; top:12px; color:#ddd; font-family:monospace; font-size:13px; background:rgba(0,0,0,0.25); padding:8px; border-radius:6px; z-index: 1000;}
+  </style>
+</head>
+<body>
+  <div class="hint">Click the coin • Buy upgrades • Progress automatically</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+
+  <!-- REGION:SCENE_CLASS_START -->
+  <script>
+  class IdleScene extends Phaser.Scene {
+    constructor() { super('IdleScene'); }
+    
+    preload() {
+      this.generateTextures();
+    }
+    
+    generateTextures() {
+      // Coin texture
+      if (!this.textures.exists('coin')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xffcc33, 1);
+        g.fillCircle(60, 60, 58);
+        g.lineStyle(6, 0xffffff);
+        g.strokeCircle(60, 60, 58);
+        g.fillStyle(0xffaa00, 1);
+        g.fillCircle(60, 60, 35);
+        g.generateTexture('coin', 120, 120);
+        g.destroy();
+      }
+    }
+    
+    create() {
+      // Initialize upgrade buttons array FIRST
+      this.upgradeButtons = [];
+
+      // Load game state
+      this.loadGameState();
+
+      this.createCoin();
+      this.createUI();
+      this.createUpgrades();
+
+      // Auto-save every 10 seconds
+      this.time.addEvent({
+        delay: 10000,
+        loop: true,
+        callback: () => this.saveGameState()
+      });
+
+      // Passive income timer
+      this.lastPassiveTime = 0;
+    }
+
+    update(time) {
+      // Passive income (dps)
+      if (time - this.lastPassiveTime > 1000 && this.gameState.dps > 0) {
+        this.gameState.gold += this.gameState.dps;
+        this.updateUI();
+        this.lastPassiveTime = time;
+      }
+    }
+
+    loadGameState() {
+      const saved = localStorage.getItem('idleGameSave');
+      
+      if (saved) {
+        this.gameState = JSON.parse(saved);
+      } else {
+        this.gameState = {
+          gold: 0,
+          clickPower: 1,
+          dps: 0,
+          totalClicks: 0,
+          upgrades: {
+            clickPower: 0,
+            autoClicker: 0,
+            dpsBoost: 0
+          }
+        };
+      }
+    }
+
+    saveGameState() {
+      localStorage.setItem('idleGameSave', JSON.stringify(this.gameState));
+    }
+
+    createCoin() {
+      this.coin = this.add.sprite(400, 250, 'coin').setInteractive();
+      
+      // Add dollar sign text on top of coin
+      this.coinText = this.add.text(400, 250, '$', {
+        fontFamily: 'Arial',
+        fontSize: 48,
+        color: '#ffffff',
+        fontStyle: 'bold'
+      }).setOrigin(0.5);
+      
+      this.coin.on('pointerdown', () => {
+        this.gameState.gold += this.gameState.clickPower;
+        this.gameState.totalClicks++;
+        this.updateUI();
+        this.flashCoin();
+      });
+
+      this.coin.on('pointerover', () => {
+        this.coin.setScale(1.1);
+        this.coinText.setScale(1.1);
+      });
+
+      this.coin.on('pointerout', () => {
+        this.coin.setScale(1);
+        this.coinText.setScale(1);
+      });
+    }
+
+    flashCoin() {
+      this.tweens.add({
+        targets: [this.coin, this.coinText],
+        scale: 1.3,
+        duration: 80,
+        yoyo: true
+      });
+
+      // Floating text
+      const floating = this.add.text(
+        this.coin.x,
+        this.coin.y - 80,
+        '+' + this.gameState.clickPower,
+        {
+          fontFamily: 'monospace',
+          fontSize: 32,
+          color: '#ffff00',
+          fontStyle: 'bold'
+        }
+      ).setOrigin(0.5);
+
+      this.tweens.add({
+        targets: floating,
+        y: floating.y - 60,
+        alpha: 0,
+        duration: 800,
+        onComplete: () => floating.destroy()
+      });
+    }
+
+    createUpgrades() {
+      const upgrades = [
+        {
+          name: '+1 Click Power',
+          cost: 10,
+          type: 'clickPower',
+          x: 120
+        },
+        {
+          name: '+1 Auto-Clicker',
+          cost: 50,
+          type: 'autoClicker',
+          x: 340
+        },
+        {
+          name: '+5 DPS Boost',
+          cost: 100,
+          type: 'dpsBoost',
+          x: 560
+        }
+      ];
+
+      upgrades.forEach((upgrade) => {
+        const button = this.add.text(
+          upgrade.x,
+          500,
+          upgrade.name + '\nCost: ' + upgrade.cost,
+          {
+            fontFamily: 'monospace',
+            fontSize: 14,
+            color: '#fff',
+            align: 'center',
+            backgroundColor: '#2255dd',
+            padding: { x: 12, y: 8 }
+          }
+        ).setInteractive();
+
+        button.upgrade = upgrade;
+        
+        button.on('pointerdown', () => this.buyUpgrade(upgrade, button));
+        button.on('pointerover', () => {
+          button.setBackgroundColor('#4488ff');
+          button.setScale(1.05);
+        });
+        button.on('pointerout', () => {
+          button.setBackgroundColor('#2255dd');
+          button.setScale(1);
+        });
+
+        this.upgradeButtons.push({ button, upgrade });
+      });
+    }
+
+    buyUpgrade(upgrade, button) {
+      if (this.gameState.gold >= upgrade.cost) {
+        this.gameState.gold -= upgrade.cost;
+
+        switch (upgrade.type) {
+          case 'clickPower':
+            this.gameState.clickPower += 1;
+            this.gameState.upgrades.clickPower++;
+            break;
+          case 'autoClicker':
+            this.gameState.dps += 1;
+            this.gameState.upgrades.autoClicker++;
+            break;
+          case 'dpsBoost':
+            this.gameState.dps += 5;
+            this.gameState.upgrades.dpsBoost++;
+            break;
+        }
+
+        this.updateUI();
+        this.saveGameState();
+
+        // Visual feedback
+        this.tweens.add({
+          targets: button,
+          scaleX: 1.1,
+          scaleY: 1.1,
+          duration: 100,
+          yoyo: true
+        });
+      } else {
+        // Can't afford - flash red
+        button.setBackgroundColor('#dd2255');
+        this.time.delayedCall(200, () => {
+          button.setBackgroundColor('#2255dd');
+        });
+      }
+    }
+
+    createUI() {
+      // Main stats
+      this.goldText = this.add.text(450, 60, 'Gold: 0', {
+        fontFamily: 'monospace',
+        fontSize: 32,
+        color: '#ffff00',
+        fontStyle: 'bold',
+        align: 'left'
+      });
+
+      this.statsText = this.add.text(450, 110, 'Click Power: 1\nDPS: 0\nTotal Clicks: 0', {
+        fontFamily: 'monospace',
+        fontSize: 14,
+        color: '#aaa',
+        align: 'left'
+      });
+
+      this.updateUI();
+    }
+
+    updateUI() {
+      this.goldText.setText('Gold: ' + Math.floor(this.gameState.gold));
+      this.statsText.setText(
+        `Click Power: ${this.gameState.clickPower}\n` +
+        `DPS: ${this.gameState.dps}\n` +
+        `Total Clicks: ${this.gameState.totalClicks}`
+      );
+
+      // Update upgrade button affordability (only if buttons exist)
+      if (this.upgradeButtons && this.upgradeButtons.length > 0) {
+        this.upgradeButtons.forEach(({ button, upgrade }) => {
+          if (this.gameState.gold >= upgrade.cost) {
+            button.setColor('#fff');
+          } else {
+            button.setColor('#888');
+          }
+        });
+      }
+    }
+  }
+  </script>
+  <!-- REGION:SCENE_CLASS_END -->
+
+  <!-- REGION:CONFIG_START -->
+  <script>
+  const config = {
+    type: Phaser.AUTO,
+    width: 900,
+    height: 600,
+    backgroundColor: 0x111111,
+    scene: [IdleScene]
+  };
+  </script>
+  <!-- REGION:CONFIG_END -->
+
+  <!-- REGION:GAME_INIT_START -->
+  <script>
+  window.onload = () => {
+    const game = new Phaser.Game(config);
+  };
+  </script>
+  <!-- REGION:GAME_INIT_END -->
+
+</body>
+</html>

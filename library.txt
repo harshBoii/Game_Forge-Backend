@@ -1,0 +1,5183 @@
+TemplateType_TopDownArena="""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Top-Down Arena - Phaser Template</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    html,body { margin:0; padding:0; background:#0b0f1a; height:100%; }
+    #game { width:100vw; height:100vh; display:block; }
+    .hint { position: absolute; right: 12px; top: 12px; color:#ddd; font-family: monospace; font-size:13px; background: rgba(0,0,0,0.25); padding:8px; border-radius:6px;}
+  </style>
+</head>
+<body>
+  <div class="hint">WASD / Arrow keys to move • Click to shoot</div>
+
+  <!-- REGION:CONFIG_START -->
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+  <script>
+  const CONFIG = {
+    type: Phaser.AUTO,
+    parent: null,
+    width: Math.min(900, window.innerWidth),
+    height: Math.min(700, window.innerHeight),
+    backgroundColor: 0x071022,
+    physics: {
+      default: 'arcade',
+      arcade: { debug: false, gravity: { y: 0 } }
+    },
+    scene: [ArenaScene]
+  };
+  </script>
+  <!-- REGION:CONFIG_END -->
+
+  <!-- REGION:SCENE_CLASS_START -->
+  <script>
+  class ArenaScene extends Phaser.Scene {
+    constructor() { super({ key: 'ArenaScene' }); }
+    preload() {}
+    create() {
+      // world bounds
+      this.cameras.main.setBackgroundColor('#071022');
+      this.worldBounds = new Phaser.Geom.Rectangle(0, 0, this.scale.width, this.scale.height);
+
+      // groups
+      this.bullets = this.physics.add.group({ classType: Bullet, runChildUpdate: true });
+      this.enemies = this.physics.add.group({ runChildUpdate: true });
+
+      // player
+      this.createPlayer();
+
+      // input
+      this.cursors = this.input.keyboard.createCursorKeys();
+      this.keys = this.input.keyboard.addKeys('W,A,S,D');
+      this.input.on('pointerdown', (p) => this.playerShoot(p));
+
+      // spawn loop
+      this.time.addEvent({ delay: 900, callback: this.spawnEnemy, callbackScope: this, loop: true });
+
+      // UI
+      this.score = 0;
+      this.health = 5;
+      this.createUI();
+
+      // collisions
+      this.physics.add.overlap(this.bullets, this.enemies, this.onBulletHitEnemy, null, this);
+      this.physics.add.overlap(this.player, this.enemies, this.onPlayerHit, null, this);
+    }
+
+    update(time, delta) {
+      this.updatePlayer();
+      // remove off-screen bullets
+      this.bullets.children.iterate(b => { if (b && !Phaser.Geom.Rectangle.Overlaps(this.worldBounds, b.getBounds())) b.destroy(); });
+    }
+  }
+  </script>
+  <!-- REGION:SCENE_CLASS_END -->
+
+  <!-- REGION:PLAYER_LOGIC_START -->
+  <script>
+  // Simple procedural player: circle with eyes
+  ArenaScene.prototype.createPlayer = function() {
+    const x = this.scale.width / 2;
+    const y = this.scale.height / 2;
+    const g = this.add.graphics();
+    g.fillStyle(0x47c6ff, 1);
+    g.fillCircle(0, 0, 18);
+    // eyes
+    g.fillStyle(0xffffff, 1);
+    g.fillCircle(-6, -6, 4);
+    g.fillCircle(6, -6, 4);
+    // pupils
+    g.fillStyle(0x111111, 1);
+    g.fillCircle(-6, -6, 2);
+    g.fillCircle(6, -6, 2);
+
+    const textureKey = 'playerTex';
+    g.generateTexture(textureKey, 48, 48);
+    g.destroy();
+
+    this.player = this.physics.add.sprite(x, y, textureKey);
+    this.player.setCollideWorldBounds(true);
+    this.player.speed = 180;
+    this.player.lastFired = 0;
+  };
+
+  ArenaScene.prototype.updatePlayer = function() {
+    const p = this.player;
+    p.body.setVelocity(0);
+
+    const left = this.cursors.left.isDown || this.keys.A.isDown;
+    const right = this.cursors.right.isDown || this.keys.D.isDown;
+    const up = this.cursors.up.isDown || this.keys.W.isDown;
+    const down = this.cursors.down.isDown || this.keys.S.isDown;
+
+    if (left) p.body.setVelocityX(-p.speed);
+    if (right) p.body.setVelocityX(p.speed);
+    if (up) p.body.setVelocityY(-p.speed);
+    if (down) p.body.setVelocityY(p.speed);
+
+    // rotate to pointer
+    const pointer = this.input.activePointer;
+    const angle = Phaser.Math.Angle.Between(p.x, p.y, pointer.worldX, pointer.worldY);
+    p.rotation = angle;
+  };
+
+  ArenaScene.prototype.playerShoot = function(pointer) {
+    const now = this.time.now;
+    if (now - this.player.lastFired < 200) return; // fire rate
+    this.player.lastFired = now;
+
+    const b = this.bullets.get();
+    if (b) {
+      b.fire(this.player.x, this.player.y, this.player.rotation);
+    }
+  };
+
+  // Bullet class
+  function Bullet(scene, x, y) {
+    Phaser.Physics.Arcade.Sprite.call(this, scene, x, y, null);
+    this.scene = scene;
+  }
+  Bullet.prototype = Object.create(Phaser.Physics.Arcade.Sprite.prototype);
+  Bullet.prototype.constructor = Bullet;
+
+  Bullet.prototype.fire = function(x, y, rotation) {
+    if (!this.body) {
+      this.scene.physics.world.enable(this);
+      this.scene.add.existing(this);
+      // procedural texture for bullet
+      const g = this.scene.add.graphics();
+      g.fillStyle(0xffff66, 1); g.fillCircle(0,0,5);
+      g.generateTexture('bulletTex', 12, 12);
+      g.destroy();
+      this.setTexture('bulletTex');
+    }
+    this.setActive(true);
+    this.setVisible(true);
+    this.enableBody(true, x, y, true, true);
+    this.setDepth(2);
+    const speed = 420;
+    this.scene.physics.velocityFromRotation(rotation, speed, this.body.velocity);
+    // life timer
+    this.scene.time.delayedCall(1800, () => { if (this) this.destroy(); });
+  };
+
+  Bullet.prototype.update = function() {
+    // noop; lifetime handled via timer
+  };
+  </script>
+  <!-- REGION:PLAYER_LOGIC_END -->
+
+  <!-- REGION:ENEMY_LOGIC_START -->
+  <script>
+  ArenaScene.prototype.spawnEnemy = function() {
+    const edge = Phaser.Math.Between(0,3);
+    let x,y;
+    if (edge === 0) { x = Phaser.Math.Between(0, this.scale.width); y = -20; }
+    else if (edge === 1) { x = this.scale.width + 20; y = Phaser.Math.Between(0, this.scale.height); }
+    else if (edge === 2) { x = Phaser.Math.Between(0, this.scale.width); y = this.scale.height + 20; }
+    else { x = -20; y = Phaser.Math.Between(0, this.scale.height); }
+
+    // procedural enemy texture
+    const key = 'enemyTex';
+    if (!this.textures.exists(key)) {
+      const g = this.add.graphics();
+      g.fillStyle(0xff6b6b,1); g.fillCircle(0,0,14);
+      g.fillStyle(0x000000, 1); g.fillRect(-6,4,12,6); // mouth
+      g.generateTexture(key, 32, 32); g.destroy();
+    }
+
+    const enemy = this.enemies.create(x, y, key);
+    enemy.setDepth(1);
+    enemy.hp = 1 + Phaser.Math.Between(0,2);
+    enemy.speed = 60 + Phaser.Math.Between(0,80);
+    enemy.setCircle(14);
+    enemy.update = function() {
+      if (!this.scene || !this.active) return;
+      this.scene.physics.moveToObject(this, this.scene.player, this.speed);
+      this.rotation = Phaser.Math.Angle.Between(this.x, this.y, this.scene.player.x, this.scene.player.y);
+    };
+  };
+
+  ArenaScene.prototype.onBulletHitEnemy = function(bullet, enemy) {
+    try { bullet.destroy(); } catch(e){}
+    enemy.hp -= 1;
+    if (enemy.hp <= 0) {
+      // explosion effect (simple flash + destroy)
+      const e = this.add.circle(enemy.x, enemy.y, 22, 0xffe08a, 0.9);
+      this.tweens.add({ targets: e, alpha: 0, scale: 1.6, duration: 300, onComplete: ()=> e.destroy() });
+      enemy.destroy();
+      this.score += 10;
+      this.scoreText.setText('Score: ' + this.score);
+    }
+  };
+  </script>
+  <!-- REGION:ENEMY_LOGIC_END -->
+
+  <!-- REGION:COLLISIONS_START -->
+  <script>
+  ArenaScene.prototype.onPlayerHit = function(player, enemy) {
+    // knockback and damage
+    if (!enemy.active) return;
+    enemy.destroy();
+    this.health -= 1;
+    this.healthText.setText('Health: ' + this.health);
+    // hit flash
+    const flash = this.add.rectangle(player.x, player.y, 60, 60, 0xff4444, 0.35);
+    this.tweens.add({ targets: flash, alpha: 0, duration: 300, onComplete: ()=> flash.destroy() });
+
+    if (this.health <= 0) {
+      this.scene.pause();
+      this.showGameOver();
+    }
+  };
+  </script>
+  <!-- REGION:COLLISIONS_END -->
+
+  <!-- REGION:UI_START -->
+  <script>
+  ArenaScene.prototype.createUI = function() {
+    this.scoreText = this.add.text(8, 8, 'Score: 0', { fontFamily: 'monospace', fontSize: 18, color: '#fff' }).setDepth(10);
+    this.healthText = this.add.text(this.scale.width - 110, 8, 'Health: 5', { fontFamily: 'monospace', fontSize: 18, color: '#fff' }).setDepth(10);
+
+    // timer (90 seconds)
+    this.timeLeft = 60;
+    this.timerText = this.add.text(8, 32, 'Time: ' + this.timeLeft, { fontFamily: 'monospace', fontSize: 16, color: '#ddd' }).setDepth(10);
+    this.timeEvent = this.time.addEvent({ delay: 1000, callback: ()=> {
+      this.timeLeft -= 1;
+      this.timerText.setText('Time: ' + this.timeLeft);
+      if (this.timeLeft <= 0) {
+        this.scene.pause();
+        this.showGameOver(true);
+      }
+    }, callbackScope: this, loop: true });
+  };
+
+  ArenaScene.prototype.showGameOver = function(win=false) {
+    const msg = win ? 'You Survived!' : 'Game Over';
+    this.gameOverText = this.add.text(this.scale.width/2, this.scale.height/2 - 20, msg, { fontFamily:'monospace', fontSize: 34, color:'#fff' }).setOrigin(0.5);
+    this.finalScoreText = this.add.text(this.scale.width/2, this.scale.height/2 + 20, 'Score: ' + this.score, { fontFamily:'monospace', fontSize:20, color:'#fff' }).setOrigin(0.5);
+    // show restart hint
+    this.restartHint = this.add.text(this.scale.width/2, this.scale.height/2 + 64, 'Click to Restart', { fontFamily:'monospace', fontSize:14, color:'#ddd' }).setOrigin(0.5);
+    this.input.once('pointerdown', ()=> this.scene.restart());
+  };
+  </script>
+  <!-- REGION:UI_END -->
+
+  <!-- REGION:RESTART_LOGIC_START -->
+  <script>
+  // Boot
+  window.onload = () => {
+    // Ensure ArenaScene is defined for config above
+    const config = {
+      type: Phaser.AUTO,
+      width: Math.min(900, window.innerWidth),
+      height: Math.min(700, window.innerHeight),
+      backgroundColor: 0x071022,
+      physics: { default: 'arcade', arcade: { debug: false, gravity: { y: 0 } } },
+      scene: [ArenaScene]
+    };
+    const game = new Phaser.Game(config);
+    // small resize handler
+    window.addEventListener('resize', ()=> {
+      game.scale.resize(Math.min(900, window.innerWidth), Math.min(700, window.innerHeight));
+    });
+  };
+  </script>
+  <!-- REGION:RESTART_LOGIC_END -->
+</body>
+</html>
+"""
+
+
+TemplateType_TopDownArena Side-Scroller="""
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Side-Scroller Platformer - Phaser Template</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    html,body { margin:0; padding:0; background:#102226; height:100%; }
+    .hint { position: absolute; right: 12px; top: 12px; color:#fff; font-family: monospace; font-size:13px; background: rgba(0,0,0,0.25); padding:8px; border-radius:6px;}
+  </style>
+</head>
+<body>
+  <div class="hint">A / D or ← → to move • W / SPACE to jump</div>
+
+  <!-- REGION:CONFIG_START -->
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+  <script>
+  const config = {
+    type: Phaser.AUTO,
+    width: Math.min(1000, window.innerWidth),
+    height: Math.min(600, window.innerHeight),
+    backgroundColor: 0x102226,
+    physics: { default: 'arcade', arcade: { gravity: { y: 900 }, debug: false } },
+    scene: [PlatformScene]
+  };
+  </script>
+  <!-- REGION:CONFIG_END -->
+
+  <!-- REGION:SCENE_CLASS_START -->
+  <script>
+  class PlatformScene extends Phaser.Scene {
+    constructor() { super({ key: 'PlatformScene' }); }
+    preload() {}
+    create() {
+      // ground + platforms
+      this.platforms = this.physics.add.staticGroup();
+      this.createLevel();
+
+      // player
+      this.createPlayer();
+
+      // camera
+      this.cameras.main.setBounds(0, 0, 2000, this.scale.height);
+      this.physics.world.setBounds(0, 0, 2000, this.scale.height);
+      this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
+
+      // inputs
+      this.cursors = this.input.keyboard.createCursorKeys();
+      this.keys = this.input.keyboard.addKeys('A,D,W');
+
+      // enemies
+      this.enemies = this.physics.add.group();
+      this.spawnPatrolEnemy(600, 460);
+      this.spawnPatrolEnemy(1200, 460);
+
+      // collisions
+      this.physics.add.collider(this.player, this.platforms);
+      this.physics.add.collider(this.enemies, this.platforms);
+      this.physics.add.collider(this.player, this.enemies, this.onPlayerHit, null, this);
+
+      // UI
+      this.score = 0;
+      this.createUI();
+    }
+
+    update() {
+      this.updatePlayer();
+      // basic enemy patrol AI
+      this.enemies.children.iterate(e => {
+        if (!e) return;
+        if (e.body.blocked.left) e.setVelocityX(e.speed);
+        if (e.body.blocked.right) e.setVelocityX(-e.speed);
+      });
+    }
+  }
+  </script>
+  <!-- REGION:SCENE_CLASS_END -->
+
+  <!-- REGION:PLAYER_LOGIC_START -->
+  <script>
+  PlatformScene.prototype.createPlayer = function() {
+    // procedural player sprite - capsule with eyes
+    const g = this.add.graphics();
+    g.fillStyle(0xffcc66,1);
+    g.fillRoundedRect(0,0,36,48,12);
+    g.fillStyle(0xffffff,1); g.fillCircle(10,14,4); g.fillCircle(26,14,4);
+    g.fillStyle(0x000000,1); g.fillCircle(10,14,2); g.fillCircle(26,14,2);
+    g.generateTexture('playerPlat', 36, 48); g.destroy();
+
+    this.player = this.physics.add.sprite(100, 300, 'playerPlat');
+    this.player.setBounce(0.05);
+    this.player.setCollideWorldBounds(true);
+    this.player.body.setSize(34,46).setOffset(1,1);
+    this.player.speed = 200;
+    this.player.jumpSpeed = -420;
+    this.player.isJumping = false;
+  };
+
+  PlatformScene.prototype.updatePlayer = function() {
+    const left = this.cursors.left.isDown || this.keys.A.isDown;
+    const right = this.cursors.right.isDown || this.keys.D.isDown;
+    const up = this.cursors.up.isDown || this.keys.W.isDown || this.cursors.space.isDown;
+
+    if (left) this.player.setVelocityX(-this.player.speed);
+    else if (right) this.player.setVelocityX(this.player.speed);
+    else this.player.setVelocityX(0);
+
+    if (up && this.player.body.blocked.down) {
+      this.player.setVelocityY(this.player.jumpSpeed);
+      this.player.isJumping = true;
+    }
+  };
+  </script>
+  <!-- REGION:PLAYER_LOGIC_END -->
+
+  <!-- REGION:ENEMY_LOGIC_START -->
+  <script>
+  PlatformScene.prototype.createLevel = function() {
+    // ground
+    this.platforms.create(500, this.scale.height - 16, null).setScale(100,1).refreshBody();
+    // procedural ground texture
+    if (!this.textures.exists('ground')) {
+      const gg = this.add.graphics(); gg.fillStyle(0x3b2f2f,1); gg.fillRect(0,0,64,16); gg.generateTexture('ground', 64, 16); gg.destroy();
+    }
+    for (let i=0;i<32;i++){
+      const x = i*64;
+      const p = this.add.image(x, this.scale.height-16, 'ground').setOrigin(0,1);
+      this.platforms.add(p);
+      p.refreshBody && p.refreshBody();
+    }
+
+    // floating platforms
+    const platPositions = [[400,460],[800,380],[1100,330],[1500,420]];
+    platPositions.forEach(pos => {
+      const px = this.add.image(pos[0], pos[1], 'ground').setOrigin(0.5,0.5).setScale(2,1);
+      this.platforms.add(px);
+      px.refreshBody && px.refreshBody();
+    });
+  };
+
+  PlatformScene.prototype.spawnPatrolEnemy = function(x,y) {
+    // simple box enemy
+    const g = this.add.graphics();
+    g.fillStyle(0x9ad1ff,1); g.fillRect(0,0,36,28);
+    g.generateTexture('patrol', 36, 28); g.destroy();
+
+    const e = this.enemies.create(x,y,'patrol');
+    e.setBounce(0.1);
+    e.setCollideWorldBounds(true);
+    e.speed = 70;
+    e.setVelocityX(e.speed);
+    e.body.setSize(34,26).setOffset(1,1);
+  };
+  </script>
+  <!-- REGION:ENEMY_LOGIC_END -->
+
+  <!-- REGION:COLLISIONS_START -->
+  <script>
+  PlatformScene.prototype.onPlayerHit = function(player, enemy) {
+    // if player above enemy - stomp
+    if (player.body.velocity.y > 0 && player.body.bottom <= enemy.body.top + 16) {
+      // stomp: destroy enemy and bounce player
+      enemy.destroy();
+      player.setVelocityY(-240);
+      this.score += 20;
+      this.scoreText.setText('Score: ' + this.score);
+      // stomp effect
+      const s = this.add.circle(enemy.x, enemy.y, 26, 0xffee88, 0.8);
+      this.tweens.add({ targets: s, alpha: 0, scale: 1.4, duration: 220, onComplete: ()=> s.destroy() });
+    } else {
+      // take damage and knockback
+      player.setTint(0xff8888);
+      this.time.delayedCall(300, ()=> player.clearTint());
+      // push back
+      const dir = player.x < enemy.x ? -200 : 200;
+      player.setVelocityX(dir);
+    }
+  };
+  </script>
+  <!-- REGION:COLLISIONS_END -->
+
+  <!-- REGION:UI_START -->
+  <script>
+  PlatformScene.prototype.createUI = function() {
+    this.scoreText = this.add.text(16, 16, 'Score: 0', { fontFamily: 'monospace', fontSize: 18, color:'#fff' }).setScrollFactor(0);
+    // goal area far right
+    this.goalX = 1900;
+    this.add.text(this.goalX, 120, 'GOAL', { fontFamily:'monospace', fontSize: 20, color:'#fff' }).setOrigin(0.5).setX(this.goalX).setY(120);
+    // simple win check
+    this.time.addEvent({ delay: 200, callback: ()=> {
+      if (this.player.x >= this.goalX) this.onWin();
+    }, loop: true });
+  };
+
+  PlatformScene.prototype.onWin = function() {
+    this.physics.pause();
+    this.add.text(this.cameras.main.scrollX + this.scale.width/2, 180, 'You Win!', { fontFamily:'monospace', fontSize:40, color:'#fff' }).setOrigin(0.5);
+    this.add.text(this.cameras.main.scrollX + this.scale.width/2, 240, 'Click to Restart', { fontFamily:'monospace', fontSize:16, color:'#ddd' }).setOrigin(0.5);
+    this.input.once('pointerdown', ()=> this.scene.restart());
+  };
+  </script>
+  <!-- REGION:UI_END -->
+
+  <!-- REGION:RESTART_LOGIC_START -->
+  <script>
+  window.onload = () => {
+    const game = new Phaser.Game(config);
+    window.addEventListener('resize', ()=> {
+      game.scale.resize(Math.min(1000, window.innerWidth), Math.min(600, window.innerHeight));
+    });
+  };
+  </script>
+  <!-- REGION:RESTART_LOGIC_END -->
+</body>
+</html>
+"""
+
+TemplateType_TopDownArena endless_runner="""
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Endless Runner - Phaser Template</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html,body { margin:0; padding:0; background:#111; height:100%; }
+    .hint { position: absolute; right: 12px; top: 12px; color:#ddd; font-family: monospace; font-size:13px; background: rgba(0,0,0,0.25); padding:8px; border-radius:6px; z-index: 1000;}
+  </style>
+</head>
+<body>
+  <div class="hint">SPACE or ↑ to Jump</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+
+  <!-- REGION:SCENE_CLASS_START -->
+  <script>
+  class RunnerScene extends Phaser.Scene {
+    constructor() { super('RunnerScene'); }
+    
+    preload() {
+      // Generate all textures once in preload
+      this.generateTextures();
+    }
+    
+    generateTextures() {
+      // Player texture
+      if (!this.textures.exists('runner')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xffcc66, 1);
+        g.fillRoundedRect(0, 0, 32, 48, 8);
+        g.fillStyle(0x000000, 1);
+        g.fillCircle(10, 14, 3);
+        g.fillCircle(22, 14, 3);
+        g.generateTexture('runner', 32, 48);
+        g.destroy();
+      }
+
+      // Ground texture
+      if (!this.textures.exists('ground')) {
+        const g = this.add.graphics();
+        g.fillStyle(0x223344, 1);
+        g.fillRect(0, 0, 64, 16);
+        g.generateTexture('ground', 64, 16);
+        g.destroy();
+      }
+
+      // Obstacle texture
+      if (!this.textures.exists('obstacle')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xff5555, 1);
+        g.fillRect(0, 0, 24, 40);
+        g.generateTexture('obstacle', 24, 40);
+        g.destroy();
+      }
+    }
+    
+    create() {
+      // Ground setup
+      this.platforms = this.physics.add.staticGroup();
+      this.createGround();
+
+      // Player
+      this.createPlayer();
+
+      // Input
+      this.cursors = this.input.keyboard.createCursorKeys();
+      this.keys = this.input.keyboard.addKeys('SPACE');
+
+      // Obstacles
+      this.obstacles = this.physics.add.group();
+      this.spawnTimer = this.time.addEvent({ 
+        delay: 1800, 
+        callback: this.spawnObstacle, 
+        callbackScope: this, 
+        loop: true 
+      });
+
+      // Score + UI
+      this.score = 0;
+      this.gameOver = false;
+      this.createUI();
+
+      // Collisions
+      this.physics.add.collider(this.player, this.platforms);
+      this.physics.add.collider(this.obstacles, this.platforms);
+      this.physics.add.overlap(this.player, this.obstacles, this.onHit, null, this);
+    }
+
+    update() {
+      if (this.gameOver) return;
+
+      this.updatePlayer();
+      
+      // Clean up off-screen obstacles
+      this.obstacles.children.iterate(obs => {
+        if (obs && obs.active && obs.x < -50) {
+          obs.destroy();
+        }
+      });
+    }
+
+    createPlayer() {
+      // Calculate proper spawn position (ground level - player height)
+      const groundY = this.scale.height - 16;
+      const playerSpawnY = groundY - 24; // half of player height to sit on ground
+      
+      this.player = this.physics.add.sprite(120, playerSpawnY, 'runner');
+      this.player.setCollideWorldBounds(true);
+      // REMOVED: this.player.setGravityY(1000); // BUG: This adds to world gravity!
+      this.player.setDepth(5);
+      this.player.body.setSize(28, 44).setOffset(2, 2);
+    }
+
+    updatePlayer() {
+      const isGrounded = this.player.body.touching.down;
+      
+      if ((this.cursors.up.isDown || this.keys.SPACE.isDown) && isGrounded) {
+        this.player.setVelocityY(-500);
+      }
+    }
+
+    createGround() {
+      // Create ground at bottom with proper positioning
+      const groundY = this.scale.height - 8; // Center of 16px tile at height-8
+      
+      for (let x = 32; x < this.scale.width + 64; x += 64) {
+        const ground = this.platforms.create(x, groundY, 'ground');
+        ground.setOrigin(0.5, 0.5).refreshBody();
+      }
+    }
+
+    spawnObstacle() {
+      if (this.gameOver) return;
+
+      // Calculate proper obstacle spawn position (ground level - obstacle height/2)
+      const groundY = this.scale.height - 16;
+      const obstacleSpawnY = groundY - 20; // half of 40px obstacle height
+
+      const obs = this.obstacles.create(
+        this.scale.width + 20, 
+        obstacleSpawnY, 
+        'obstacle'
+      );
+      obs.setVelocityX(-260);
+      obs.body.setAllowGravity(false); // Obstacles don't need gravity
+      obs.setImmovable(true);
+      obs.body.setSize(22, 38).setOffset(1, 1);
+    }
+
+    onHit(player, obs) {
+      if (this.gameOver) return;
+      
+      this.gameOver = true;
+      this.physics.pause();
+      player.setTint(0xff4444);
+      
+      // Stop spawning obstacles
+      if (this.spawnTimer) {
+        this.spawnTimer.remove();
+      }
+      
+      this.showGameOver();
+    }
+
+    createUI() {
+      this.scoreText = this.add.text(16, 16, 'Score: 0', { 
+        fontFamily: 'monospace', 
+        fontSize: 18, 
+        color: '#fff' 
+      }).setScrollFactor(0);
+      
+      this.timer = this.time.addEvent({
+        delay: 100,
+        loop: true,
+        callback: () => {
+          if (!this.physics.world.isPaused && !this.gameOver) {
+            this.score += 1;
+            this.scoreText.setText('Score: ' + this.score);
+          }
+        }
+      });
+    }
+
+    showGameOver() {
+      this.add.text(
+        this.scale.width / 2, 
+        this.scale.height / 2 - 40, 
+        'Game Over', 
+        { 
+          fontFamily: 'monospace', 
+          fontSize: 40, 
+          color: '#fff' 
+        }
+      ).setOrigin(0.5);
+      
+      this.add.text(
+        this.scale.width / 2, 
+        this.scale.height / 2 + 10, 
+        'Score: ' + this.score, 
+        { 
+          fontFamily: 'monospace', 
+          fontSize: 24, 
+          color: '#ffd700' 
+        }
+      ).setOrigin(0.5);
+      
+      this.add.text(
+        this.scale.width / 2, 
+        this.scale.height / 2 + 50, 
+        'Click to Restart', 
+        { 
+          fontFamily: 'monospace', 
+          fontSize: 16, 
+          color: '#ccc' 
+        }
+      ).setOrigin(0.5);
+      
+      this.input.once('pointerdown', () => {
+        this.scene.restart();
+      });
+    }
+  }
+  </script>
+  <!-- REGION:SCENE_CLASS_END -->
+
+  <!-- REGION:CONFIG_START -->
+  <script>
+  const config = {
+    type: Phaser.AUTO,
+    width: 900,
+    height: 480,
+    backgroundColor: 0x1c1c28,
+    physics: {
+      default: 'arcade',
+      arcade: { 
+        gravity: { y: 1000 }, 
+        debug: false 
+      }
+    },
+    scene: [RunnerScene]
+  };
+  </script>
+  <!-- REGION:CONFIG_END -->
+
+  <!-- REGION:GAME_INIT_START -->
+  <script>
+  window.onload = () => {
+    const game = new Phaser.Game(config);
+  };
+  </script>
+  <!-- REGION:GAME_INIT_END -->
+
+</body>
+</html>
+
+"""
+
+
+TemplateType_TopDownArena Fighting_Game_(Side_View)="""
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Fighting Game - Human vs AI</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html,body { margin:0; padding:0; background:#111; height:100%; }
+    .hint { position: absolute; right: 12px; top: 12px; color:#ddd; font-family: monospace; font-size:13px; background: rgba(0,0,0,0.25); padding:8px; border-radius:6px; z-index: 1000;}
+  </style>
+</head>
+<body>
+  <div class="hint">A/D to move • W to jump • F to punch</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+
+  <!-- REGION:SCENE_CLASS_START -->
+  <script>
+  class FightScene extends Phaser.Scene {
+    constructor() { super('FightScene'); }
+    
+    preload() {
+      this.generateTextures();
+    }
+    
+    generateTextures() {
+      // Player texture (blue)
+      if (!this.textures.exists('p1tex')) {
+        const g = this.add.graphics();
+        g.fillStyle(0x33aaff, 1);
+        g.fillRect(0, 0, 40, 60);
+        g.fillStyle(0xffffff, 1);
+        g.fillCircle(20, 15, 8);
+        g.fillStyle(0x000000, 1);
+        g.fillCircle(20, 15, 3);
+        g.generateTexture('p1tex', 40, 60);
+        g.destroy();
+      }
+
+      // AI texture (red)
+      if (!this.textures.exists('p2tex')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xff5566, 1);
+        g.fillRect(0, 0, 40, 60);
+        g.fillStyle(0xffffff, 1);
+        g.fillCircle(20, 15, 8);
+        g.fillStyle(0x000000, 1);
+        g.fillCircle(20, 15, 3);
+        g.generateTexture('p2tex', 40, 60);
+        g.destroy();
+      }
+
+      // Ground texture
+      if (!this.textures.exists('ground')) {
+        const g = this.add.graphics();
+        g.fillStyle(0x2d2d44, 1);
+        g.fillRect(0, 0, 64, 40);
+        g.generateTexture('ground', 64, 40);
+        g.destroy();
+      }
+    }
+    
+    create() {
+      this.createStage();
+      this.createPlayers();
+      this.createUI();
+
+      this.physics.add.collider(this.player, this.platforms);
+      this.physics.add.collider(this.ai, this.platforms);
+
+      // Only human player has keyboard input
+      this.input.keyboard.on('keydown-F', () => this.attack(this.player, this.ai));
+      
+      this.gameOver = false;
+      
+      // AI decision timer
+      this.aiTimer = this.time.addEvent({
+        delay: 150,
+        callback: this.updateAI,
+        callbackScope: this,
+        loop: true
+      });
+    }
+
+    update() {
+      if (this.gameOver) return;
+      
+      this.updatePlayer(this.player, this.keys1);
+    }
+
+    createStage() {
+      this.platforms = this.physics.add.staticGroup();
+      
+      const groundY = this.scale.height - 20;
+      for (let x = 32; x < this.scale.width; x += 64) {
+        const ground = this.platforms.create(x, groundY, 'ground');
+        ground.setOrigin(0.5, 0.5).refreshBody();
+      }
+    }
+
+    createPlayers() {
+      const groundY = this.scale.height - 40;
+      const spawnY = groundY - 30;
+
+      // Human player
+      this.player = this.physics.add.sprite(200, spawnY, 'p1tex');
+      this.player.setCollideWorldBounds(true);
+      this.player.body.setSize(36, 58).setOffset(2, 1);
+      this.player.hp = 5;
+      this.player.cooldown = false;
+      this.player.facing = 1;
+
+      // AI opponent
+      this.ai = this.physics.add.sprite(760, spawnY, 'p2tex');
+      this.ai.setCollideWorldBounds(true);
+      this.ai.body.setSize(36, 58).setOffset(2, 1);
+      this.ai.hp = 5;
+      this.ai.cooldown = false;
+      this.ai.facing = -1;
+      
+      // AI state
+      this.ai.state = 'approach';
+      this.ai.reactionTime = 0;
+
+      // Controls (only for player)
+      this.keys1 = this.input.keyboard.addKeys('A,D,W');
+    }
+
+    updatePlayer(player, keys) {
+      const isGrounded = player.body.touching.down;
+      
+      if (keys.left?.isDown || keys.A?.isDown) {
+        player.setVelocityX(-200);
+        player.facing = -1;
+      } else if (keys.right?.isDown || keys.D?.isDown) {
+        player.setVelocityX(200);
+        player.facing = 1;
+      } else {
+        player.setVelocityX(0);
+      }
+
+      if ((keys.up?.isDown || keys.W?.isDown) && isGrounded) {
+        player.setVelocityY(-500);
+      }
+    }
+
+    updateAI() {
+      if (this.gameOver || !this.ai || !this.player) return;
+
+      const distance = Math.abs(this.ai.x - this.player.x);
+      const isGrounded = this.ai.body.touching.down;
+      
+      // Update facing direction
+      this.ai.facing = this.ai.x < this.player.x ? 1 : -1;
+
+      // AI Decision Making
+      if (this.ai.reactionTime > 0) {
+        this.ai.reactionTime--;
+        return;
+      }
+
+      // State machine with decision tree
+      if (distance < 60) {
+        // Close range - attack or retreat
+        if (Math.random() > 0.3 && !this.ai.cooldown) {
+          this.attack(this.ai, this.player);
+          this.ai.reactionTime = Phaser.Math.Between(3, 6);
+        } else {
+          // Retreat
+          this.ai.setVelocityX(this.ai.facing * -150);
+        }
+      } else if (distance < 150) {
+        // Mid range - circle and attack
+        if (Math.random() > 0.6 && !this.ai.cooldown) {
+          this.attack(this.ai, this.player);
+          this.ai.reactionTime = Phaser.Math.Between(4, 8);
+        } else {
+          // Circle around
+          const circleDir = Math.random() > 0.5 ? 1 : -1;
+          this.ai.setVelocityX(circleDir * 120);
+        }
+      } else {
+        // Far range - approach
+        this.ai.setVelocityX(this.ai.facing * 180);
+      }
+
+      // Jump logic - if player is above or random jump
+      const heightDiff = this.player.y - this.ai.y;
+      if (isGrounded) {
+        if (heightDiff < -50 || (Math.random() > 0.95 && distance < 200)) {
+          this.ai.setVelocityY(-500);
+        }
+      }
+
+      // Random pause in movement
+      if (Math.random() > 0.92) {
+        this.ai.setVelocityX(0);
+        this.ai.reactionTime = Phaser.Math.Between(2, 5);
+      }
+    }
+
+    attack(attacker, defender) {
+      if (attacker.cooldown || this.gameOver) return;
+      
+      attacker.cooldown = true;
+
+      const hitZone = new Phaser.Geom.Rectangle(
+        attacker.x + (attacker.facing * 30), 
+        attacker.y - 30, 
+        45, 
+        60
+      );
+      
+      const defBounds = defender.getBounds();
+
+      if (Phaser.Geom.Intersects.RectangleToRectangle(hitZone, defBounds)) {
+        defender.hp -= 1;
+        this.flashHit(defender);
+        
+        // Knockback
+        defender.setVelocityX(attacker.facing * 150);
+        defender.setVelocityY(-100);
+        
+        this.updateUI();
+        
+        if (defender.hp <= 0) {
+          this.declareWinner(attacker);
+        }
+      }
+
+      this.showPunchEffect(attacker);
+
+      this.time.delayedCall(400, () => {
+        if (attacker) attacker.cooldown = false;
+      });
+    }
+
+    showPunchEffect(attacker) {
+      const punchX = attacker.x + (attacker.facing * 35);
+      const punch = this.add.circle(punchX, attacker.y, 15, 0xffff00, 0.6);
+      this.tweens.add({
+        targets: punch,
+        alpha: 0,
+        scale: 1.5,
+        duration: 200,
+        onComplete: () => punch.destroy()
+      });
+    }
+
+    flashHit(target) {
+      target.setTint(0xff4444);
+      this.time.delayedCall(200, () => {
+        if (target) target.clearTint();
+      });
+    }
+
+    createUI() {
+      this.hpText1 = this.add.text(20, 20, 'PLAYER: ♥♥♥♥♥', { 
+        fontFamily: 'monospace', 
+        fontSize: 18, 
+        color: '#33aaff' 
+      }).setScrollFactor(0);
+      
+      this.hpText2 = this.add.text(this.scale.width - 160, 20, 'AI: ♥♥♥♥♥', { 
+        fontFamily: 'monospace', 
+        fontSize: 18, 
+        color: '#ff5566' 
+      }).setScrollFactor(0);
+    }
+
+    updateUI() {
+      const hearts1 = '♥'.repeat(Math.max(0, this.player.hp));
+      const hearts2 = '♥'.repeat(Math.max(0, this.ai.hp));
+      
+      this.hpText1.setText('PLAYER: ' + hearts1);
+      this.hpText2.setText('AI: ' + hearts2);
+    }
+
+    declareWinner(winner) {
+      this.gameOver = true;
+      this.physics.pause();
+      
+      if (this.aiTimer) {
+        this.aiTimer.remove();
+      }
+      
+      const winnerName = winner === this.player ? 'You Win!' : 'AI Wins!';
+      const winnerColor = winner === this.player ? '#33aaff' : '#ff5566';
+      
+      this.add.text(
+        this.scale.width / 2, 
+        this.scale.height / 2 - 40, 
+        winnerName, 
+        {
+          fontFamily: 'monospace',
+          fontSize: 48,
+          color: winnerColor
+        }
+      ).setOrigin(0.5);
+      
+      this.add.text(
+        this.scale.width / 2, 
+        this.scale.height / 2 + 20, 
+        'K.O.', 
+        {
+          fontFamily: 'monospace',
+          fontSize: 32,
+          color: '#fff'
+        }
+      ).setOrigin(0.5);
+      
+      this.add.text(
+        this.scale.width / 2, 
+        this.scale.height / 2 + 70, 
+        'Click to Restart', 
+        {
+          fontFamily: 'monospace',
+          fontSize: 16,
+          color: '#ccc'
+        }
+      ).setOrigin(0.5);
+      
+      this.input.once('pointerdown', () => this.scene.restart());
+    }
+  }
+  </script>
+  <!-- REGION:SCENE_CLASS_END -->
+
+  <!-- REGION:CONFIG_START -->
+  <script>
+  const config = {
+    type: Phaser.AUTO,
+    width: 960,
+    height: 540,
+    backgroundColor: 0x202035,
+    physics: { 
+      default: 'arcade', 
+      arcade: { 
+        gravity: { y: 900 }, 
+        debug: false 
+      } 
+    },
+    scene: [FightScene]
+  };
+  </script>
+  <!-- REGION:CONFIG_END -->
+
+  <!-- REGION:GAME_INIT_START -->
+  <script>
+  window.onload = () => {
+    const game = new Phaser.Game(config);
+  };
+  </script>
+  <!-- REGION:GAME_INIT_END -->
+
+</body>
+</html>
+"""
+
+TemplateType_TopDownArena puzzleGame="""
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Puzzle / Matching - Phaser Template</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html,body { margin:0; padding:0; background:#111; height:100%; }
+    .hint { position: absolute; right: 12px; top: 12px; color:#ddd; font-family: monospace; font-size:13px; background: rgba(0,0,0,0.25); padding:8px; border-radius:6px; z-index: 1000;}
+  </style>
+</head>
+<body>
+  <div class="hint">Click tiles to select, then click adjacent tile to swap</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+
+  <!-- REGION:SCENE_CLASS_START -->
+  <script>
+  class PuzzleScene extends Phaser.Scene {
+    constructor() { super('PuzzleScene'); }
+    
+    preload() {}
+    
+    create() {
+      this.tileSize = 64;
+      this.cols = 8;
+      this.rows = 8;
+      this.offsetX = 100;
+      this.offsetY = 100;
+      this.colors = [0xff5555, 0x55ff55, 0x5555ff, 0xffff55, 0xff55ff];
+      this.grid = [];
+      this.selected = null;
+      this.isProcessing = false;
+
+      this.createGrid();
+      this.input.on('pointerdown', this.handlePointer, this);
+
+      this.score = 0;
+      this.moves = 0;
+      this.createUI();
+      
+      // Initial check for matches
+      this.time.delayedCall(100, () => this.checkAndRemoveMatches());
+    }
+
+    update() {}
+
+    createGrid() {
+      for (let y = 0; y < this.rows; y++) {
+        this.grid[y] = [];
+        for (let x = 0; x < this.cols; x++) {
+          this.grid[y][x] = this.createTile(x, y);
+        }
+      }
+    }
+
+    createTile(x, y) {
+      const color = Phaser.Utils.Array.GetRandom(this.colors);
+      const tile = this.add.rectangle(
+        this.offsetX + x * this.tileSize,
+        this.offsetY + y * this.tileSize,
+        this.tileSize - 4,
+        this.tileSize - 4,
+        color
+      ).setInteractive();
+      
+      tile.colorValue = color;
+      tile.gridX = x;
+      tile.gridY = y;
+      
+      return tile;
+    }
+
+    handlePointer(pointer) {
+      if (this.isProcessing) return;
+      
+      const x = Math.floor((pointer.x - this.offsetX) / this.tileSize);
+      const y = Math.floor((pointer.y - this.offsetY) / this.tileSize);
+      
+      if (x < 0 || y < 0 || x >= this.cols || y >= this.rows) return;
+
+      const tile = this.grid[y][x];
+      if (!tile) return;
+
+      if (!this.selected) {
+        this.selected = tile;
+        tile.setStrokeStyle(4, 0xffffff);
+      } else {
+        if (this.areAdjacent(this.selected, tile)) {
+          this.selected.setStrokeStyle(0);
+          this.swapTiles(this.selected, tile);
+        } else {
+          this.selected.setStrokeStyle(0);
+          this.selected = tile;
+          tile.setStrokeStyle(4, 0xffffff);
+        }
+      }
+    }
+
+    areAdjacent(a, b) {
+      const dx = Math.abs(a.gridX - b.gridX);
+      const dy = Math.abs(a.gridY - b.gridY);
+      return (dx === 1 && dy === 0) || (dx === 0 && dy === 1);
+    }
+
+    swapTiles(tileA, tileB) {
+      this.isProcessing = true;
+      
+      // Store original grid positions
+      const ax = tileA.gridX;
+      const ay = tileA.gridY;
+      const bx = tileB.gridX;
+      const by = tileB.gridY;
+      
+      // Swap grid positions
+      tileA.gridX = bx;
+      tileA.gridY = by;
+      tileB.gridX = ax;
+      tileB.gridY = ay;
+      
+      // Update grid array using ORIGINAL positions
+      this.grid[ay][ax] = tileB;
+      this.grid[by][bx] = tileA;
+      
+      // Animate swap
+      this.tweens.add({
+        targets: tileA,
+        x: this.offsetX + bx * this.tileSize,
+        y: this.offsetY + by * this.tileSize,
+        duration: 250,
+        ease: 'Cubic.easeOut'
+      });
+      
+      this.tweens.add({
+        targets: tileB,
+        x: this.offsetX + ax * this.tileSize,
+        y: this.offsetY + ay * this.tileSize,
+        duration: 250,
+        ease: 'Cubic.easeOut',
+        onComplete: () => {
+          const matches = this.findMatches();
+          if (matches.length === 0) {
+            // No matches - swap back
+            this.swapBack(tileA, tileB);
+          } else {
+            // Valid move
+            this.moves++;
+            this.movesText.setText('Moves: ' + this.moves);
+            this.selected = null;
+            this.checkAndRemoveMatches();
+          }
+        }
+      });
+    }
+
+    swapBack(tileA, tileB) {
+      // Swap back grid positions
+      const tempX = tileA.gridX;
+      const tempY = tileA.gridY;
+      tileA.gridX = tileB.gridX;
+      tileA.gridY = tileB.gridY;
+      tileB.gridX = tempX;
+      tileB.gridY = tempY;
+      
+      // Update grid
+      this.grid[tileA.gridY][tileA.gridX] = tileA;
+      this.grid[tileB.gridY][tileB.gridX] = tileB;
+      
+      // Animate back
+      this.tweens.add({
+        targets: tileA,
+        x: this.offsetX + tileA.gridX * this.tileSize,
+        y: this.offsetY + tileA.gridY * this.tileSize,
+        duration: 250,
+        ease: 'Cubic.easeOut'
+      });
+      
+      this.tweens.add({
+        targets: tileB,
+        x: this.offsetX + tileB.gridX * this.tileSize,
+        y: this.offsetY + tileB.gridY * this.tileSize,
+        duration: 250,
+        ease: 'Cubic.easeOut',
+        onComplete: () => {
+          this.selected = null;
+          this.isProcessing = false;
+        }
+      });
+    }
+
+    findMatches() {
+      let matches = new Set();
+      
+      // Check horizontal matches
+      for (let y = 0; y < this.rows; y++) {
+        for (let x = 0; x < this.cols - 2; x++) {
+          const t1 = this.grid[y][x];
+          const t2 = this.grid[y][x + 1];
+          const t3 = this.grid[y][x + 2];
+          
+          if (t1 && t2 && t3 && 
+              t1.colorValue === t2.colorValue && 
+              t2.colorValue === t3.colorValue) {
+            matches.add(t1);
+            matches.add(t2);
+            matches.add(t3);
+          }
+        }
+      }
+      
+      // Check vertical matches
+      for (let x = 0; x < this.cols; x++) {
+        for (let y = 0; y < this.rows - 2; y++) {
+          const t1 = this.grid[y][x];
+          const t2 = this.grid[y + 1][x];
+          const t3 = this.grid[y + 2][x];
+          
+          if (t1 && t2 && t3 && 
+              t1.colorValue === t2.colorValue && 
+              t2.colorValue === t3.colorValue) {
+            matches.add(t1);
+            matches.add(t2);
+            matches.add(t3);
+          }
+        }
+      }
+      
+      return Array.from(matches);
+    }
+
+    checkAndRemoveMatches() {
+      const matches = this.findMatches();
+      
+      if (matches.length > 0) {
+        this.removeTiles(matches);
+      } else {
+        this.isProcessing = false;
+      }
+    }
+
+    removeTiles(matches) {
+      // Update score
+      this.score += matches.length * 10;
+      this.scoreText.setText('Score: ' + this.score);
+      
+      // Animate and remove tiles
+      matches.forEach(tile => {
+        this.tweens.add({
+          targets: tile,
+          alpha: 0,
+          scale: 0,
+          duration: 200,
+          onComplete: () => {
+            tile.destroy();
+            this.grid[tile.gridY][tile.gridX] = null;
+          }
+        });
+      });
+      
+      // Wait for removal animation then drop tiles
+      this.time.delayedCall(250, () => this.dropTiles());
+    }
+
+    dropTiles() {
+      let hasMoved = false;
+      
+      // Drop tiles from bottom to top
+      for (let x = 0; x < this.cols; x++) {
+        let emptySpaces = 0;
+        
+        for (let y = this.rows - 1; y >= 0; y--) {
+          if (this.grid[y][x] === null) {
+            emptySpaces++;
+          } else if (emptySpaces > 0) {
+            // Move tile down
+            const tile = this.grid[y][x];
+            const newY = y + emptySpaces;
+            
+            this.grid[y][x] = null;
+            this.grid[newY][x] = tile;
+            tile.gridY = newY;
+            
+            this.tweens.add({
+              targets: tile,
+              y: this.offsetY + newY * this.tileSize,
+              duration: 300,
+              ease: 'Bounce.easeOut'
+            });
+            
+            hasMoved = true;
+          }
+        }
+        
+        // Fill empty spaces at top
+        for (let y = 0; y < this.rows; y++) {
+          if (this.grid[y][x] === null) {
+            const newTile = this.createTile(x, y);
+            newTile.setAlpha(0);
+            newTile.y = this.offsetY - this.tileSize;
+            this.grid[y][x] = newTile;
+            
+            this.tweens.add({
+              targets: newTile,
+              y: this.offsetY + y * this.tileSize,
+              alpha: 1,
+              duration: 300,
+              ease: 'Bounce.easeOut'
+            });
+            
+            hasMoved = true;
+          }
+        }
+      }
+      
+      // Check for new matches after drop
+      if (hasMoved) {
+        this.time.delayedCall(350, () => this.checkAndRemoveMatches());
+      } else {
+        this.isProcessing = false;
+      }
+    }
+
+    createUI() {
+      this.add.text(20, 20, 'Match 3 Puzzle', { 
+        fontFamily: 'monospace', 
+        fontSize: 24, 
+        color: '#fff',
+        fontStyle: 'bold'
+      });
+      
+      this.scoreText = this.add.text(20, 55, 'Score: 0', { 
+        fontFamily: 'monospace', 
+        fontSize: 18, 
+        color: '#55ff55'
+      });
+      
+      this.movesText = this.add.text(20, 80, 'Moves: 0', { 
+        fontFamily: 'monospace', 
+        fontSize: 18, 
+        color: '#5555ff'
+      });
+      
+      const resetBtn = this.add.text(520, 20, 'Reset', {
+        fontFamily: 'monospace',
+        fontSize: 18,
+        color: '#fff',
+        backgroundColor: '#444',
+        padding: { x: 12, y: 6 }
+      }).setInteractive();
+      
+      resetBtn.on('pointerdown', () => this.scene.restart());
+      resetBtn.on('pointerover', () => resetBtn.setStyle({ backgroundColor: '#666' }));
+      resetBtn.on('pointerout', () => resetBtn.setStyle({ backgroundColor: '#444' }));
+    }
+  }
+  </script>
+  <!-- REGION:SCENE_CLASS_END -->
+
+  <!-- REGION:CONFIG_START -->
+  <script>
+  const config = {
+    type: Phaser.AUTO,
+    width: 600,
+    height: 700,
+    backgroundColor: 0x1e1e2a,
+    scene: [PuzzleScene]
+  };
+  </script>
+  <!-- REGION:CONFIG_END -->
+
+  <!-- REGION:GAME_INIT_START -->
+  <script>
+  window.onload = () => {
+    const game = new Phaser.Game(config);
+  };
+  </script>
+  <!-- REGION:GAME_INIT_END -->
+
+</body>
+</html>
+"""
+
+TemplateType_TopDownArena race_game_top_view="""
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Top-Down Racing - Phaser Template</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html,body { margin:0; padding:0; background:#111; height:100%; }
+    .hint { position: absolute; right: 12px; top: 12px; color:#ddd; font-family: monospace; font-size:13px; background: rgba(0,0,0,0.25); padding:8px; border-radius:6px; z-index: 1000;}
+  </style>
+</head>
+<body>
+  <div class="hint">↑/↓ to accelerate/brake • ←/→ to steer</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+
+  <!-- REGION:SCENE_CLASS_START -->
+  <script>
+  class RaceScene extends Phaser.Scene {
+    constructor() { super('RaceScene'); }
+    
+    preload() {
+      this.generateTextures();
+    }
+    
+    generateTextures() {
+      // Car texture
+      if (!this.textures.exists('car')) {
+        const g = this.add.graphics();
+        g.fillStyle(0x55ccff, 1);
+        g.fillRect(-10, -20, 20, 40);
+        g.fillStyle(0xffffff, 1);
+        g.fillRect(-6, -18, 12, 10);
+        g.fillStyle(0x333333, 1);
+        g.fillCircle(-6, 14, 3);
+        g.fillCircle(6, 14, 3);
+        g.generateTexture('car', 20, 40);
+        g.destroy();
+      }
+    }
+    
+    create() {
+      this.trackCenterX = 450;
+      this.trackCenterY = 300;
+      this.trackInnerRadius = 180;
+      this.trackOuterRadius = 240;
+      
+      this.createTrack();
+      this.createCheckpoints();
+      this.createPlayer();
+
+      this.cursors = this.input.keyboard.createCursorKeys();
+      this.createUI();
+
+      // Lap tracking
+      this.lap = 1;
+      this.totalLaps = 3;
+      this.lapStart = this.time.now;
+      this.lapTimes = [];
+      this.checkpointsPassed = new Set();
+      this.canFinishLap = false;
+    }
+
+    update() {
+      this.updatePlayer();
+      this.checkTrackBoundaries();
+      this.checkCheckpoints();
+    }
+
+    createTrack() {
+      const cx = this.trackCenterX;
+      const cy = this.trackCenterY;
+      
+      // Draw track
+      const g = this.add.graphics();
+      
+      // Outer grass
+      g.fillStyle(0x2d5016, 1);
+      g.fillCircle(cx, cy, this.trackOuterRadius + 40);
+      
+      // Track surface
+      g.fillStyle(0x3a3a3a, 1);
+      g.beginPath();
+      g.arc(cx, cy, this.trackOuterRadius, 0, Math.PI * 2);
+      g.arc(cx, cy, this.trackInnerRadius, 0, Math.PI * 2, true);
+      g.closePath();
+      g.fillPath();
+      
+      // Inner grass
+      g.fillStyle(0x2d5016, 1);
+      g.fillCircle(cx, cy, this.trackInnerRadius);
+      
+      // Track markings
+      g.lineStyle(2, 0xffffff, 0.5);
+      const midRadius = (this.trackInnerRadius + this.trackOuterRadius) / 2;
+      for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 8) {
+        const x1 = cx + Math.cos(angle) * (midRadius - 10);
+        const y1 = cy + Math.sin(angle) * (midRadius - 10);
+        const x2 = cx + Math.cos(angle) * (midRadius + 10);
+        const y2 = cy + Math.sin(angle) * (midRadius + 10);
+        g.lineBetween(x1, y1, x2, y2);
+      }
+      
+      // Start/finish line
+      g.lineStyle(4, 0xffffff, 1);
+      g.lineBetween(
+        cx + this.trackInnerRadius, cy,
+        cx + this.trackOuterRadius, cy
+      );
+      
+      g.fillStyle(0x000000, 1);
+      g.fillRect(cx + this.trackInnerRadius, cy - 15, 15, 15);
+      g.fillRect(cx + this.trackInnerRadius + 15, cy, 15, 15);
+      for (let i = 30; i < this.trackOuterRadius - this.trackInnerRadius; i += 30) {
+        g.fillRect(cx + this.trackInnerRadius + i, cy - 15, 15, 15);
+        g.fillRect(cx + this.trackInnerRadius + i + 15, cy, 15, 15);
+      }
+    }
+
+    createCheckpoints() {
+      this.checkpoints = this.physics.add.staticGroup();
+      
+      const cx = this.trackCenterX;
+      const cy = this.trackCenterY;
+      const midRadius = (this.trackInnerRadius + this.trackOuterRadius) / 2;
+      const checkpointWidth = this.trackOuterRadius - this.trackInnerRadius;
+      
+      // Create 4 checkpoint zones around the track
+      const angles = [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2];
+      
+      angles.forEach((angle, index) => {
+        const x = cx + Math.cos(angle) * midRadius;
+        const y = cy + Math.sin(angle) * midRadius;
+        
+        const checkpoint = this.add.rectangle(x, y, checkpointWidth, 30, 0x00ff00, 0);
+        this.physics.add.existing(checkpoint, true);
+        checkpoint.setRotation(angle);
+        checkpoint.checkpointId = index;
+        this.checkpoints.add(checkpoint);
+      });
+    }
+
+    createPlayer() {
+      const startX = this.trackCenterX + (this.trackInnerRadius + this.trackOuterRadius) / 2;
+      const startY = this.trackCenterY;
+      
+      this.player = this.physics.add.sprite(startX, startY, 'car');
+      this.player.setCollideWorldBounds(true);
+      this.player.speed = 0;
+      this.player.maxSpeed = 250;
+      this.player.acceleration = 4;
+      this.player.deceleration = 2;
+      this.player.rotation = -Math.PI / 2; // Face left (start direction)
+      this.player.setDamping(true);
+      this.player.setDrag(0.98);
+    }
+
+    updatePlayer() {
+      const p = this.player;
+      const accel = p.acceleration;
+      const decel = p.deceleration;
+      
+      // Speed-based turn rate
+      const baseTurnSpeed = 0.05;
+      const speedFactor = Math.abs(p.speed) / p.maxSpeed;
+      const turnSpeed = baseTurnSpeed * Math.max(0.3, speedFactor);
+
+      // Acceleration/Braking
+      if (this.cursors.up.isDown) {
+        p.speed = Math.min(p.speed + accel, p.maxSpeed);
+      } else if (this.cursors.down.isDown) {
+        p.speed = Math.max(p.speed - accel * 1.5, -p.maxSpeed / 2);
+      } else {
+        // Natural deceleration
+        if (Math.abs(p.speed) > 1) {
+          p.speed *= 0.97;
+        } else {
+          p.speed = 0;
+        }
+      }
+
+      // Steering (only effective when moving)
+      if (Math.abs(p.speed) > 10) {
+        if (this.cursors.left.isDown) {
+          p.rotation -= turnSpeed;
+        }
+        if (this.cursors.right.isDown) {
+          p.rotation += turnSpeed;
+        }
+      }
+
+      // Apply velocity
+      const vx = Math.cos(p.rotation) * p.speed;
+      const vy = Math.sin(p.rotation) * p.speed;
+      p.setVelocity(vx, vy);
+    }
+
+    checkTrackBoundaries() {
+      const p = this.player;
+      const dx = p.x - this.trackCenterX;
+      const dy = p.y - this.trackCenterY;
+      const distFromCenter = Math.sqrt(dx * dx + dy * dy);
+      
+      // Check if car is off track
+      if (distFromCenter < this.trackInnerRadius || distFromCenter > this.trackOuterRadius) {
+        // Slow down significantly when off track
+        p.speed *= 0.85;
+        p.setTint(0xff8888);
+      } else {
+        p.clearTint();
+      }
+    }
+
+    checkCheckpoints() {
+      this.physics.overlap(this.player, this.checkpoints, (player, checkpoint) => {
+        const id = checkpoint.checkpointId;
+        
+        // First checkpoint must be 0 (start/finish line)
+        if (this.checkpointsPassed.size === 0 && id === 0) {
+          this.checkpointsPassed.add(id);
+          this.canFinishLap = false;
+        }
+        // Allow lap completion if all checkpoints passed and back at start
+        else if (this.checkpointsPassed.size === 3 && id === 0 && !this.canFinishLap) {
+          this.completeLap();
+          this.checkpointsPassed.clear();
+          this.canFinishLap = false;
+        }
+        // Regular checkpoint progression
+        else if (!this.checkpointsPassed.has(id) && this.checkpointsPassed.size > 0) {
+          this.checkpointsPassed.add(id);
+          if (this.checkpointsPassed.size === 4) {
+            this.canFinishLap = true;
+          }
+        }
+      });
+    }
+
+    completeLap() {
+      const lapTime = (this.time.now - this.lapStart) / 1000;
+      this.lapTimes.push(lapTime);
+      
+      // Show lap time
+      const lapText = this.add.text(
+        this.scale.width / 2,
+        150,
+        `Lap ${this.lap}: ${lapTime.toFixed(2)}s`,
+        {
+          fontFamily: 'monospace',
+          fontSize: 32,
+          color: '#ffff00',
+          stroke: '#000',
+          strokeThickness: 4
+        }
+      ).setOrigin(0.5);
+      
+      this.tweens.add({
+        targets: lapText,
+        alpha: 0,
+        y: 100,
+        duration: 2000,
+        onComplete: () => lapText.destroy()
+      });
+      
+      this.lap++;
+      this.lapText.setText(`Lap: ${this.lap}/${this.totalLaps}`);
+      this.lapStart = this.time.now;
+      
+      // Check if race finished
+      if (this.lap > this.totalLaps) {
+        this.finishRace();
+      }
+    }
+
+    finishRace() {
+      this.physics.pause();
+      
+      const totalTime = this.lapTimes.reduce((a, b) => a + b, 0);
+      const bestLap = Math.min(...this.lapTimes);
+      
+      const resultText = this.add.text(
+        this.scale.width / 2,
+        this.scale.height / 2 - 60,
+        'Race Complete!',
+        {
+          fontFamily: 'monospace',
+          fontSize: 48,
+          color: '#fff',
+          stroke: '#000',
+          strokeThickness: 6
+        }
+      ).setOrigin(0.5);
+      
+      this.add.text(
+        this.scale.width / 2,
+        this.scale.height / 2,
+        `Total Time: ${totalTime.toFixed(2)}s`,
+        {
+          fontFamily: 'monospace',
+          fontSize: 24,
+          color: '#ffff00'
+        }
+      ).setOrigin(0.5);
+      
+      this.add.text(
+        this.scale.width / 2,
+        this.scale.height / 2 + 35,
+        `Best Lap: ${bestLap.toFixed(2)}s`,
+        {
+          fontFamily: 'monospace',
+          fontSize: 20,
+          color: '#00ff00'
+        }
+      ).setOrigin(0.5);
+      
+      this.add.text(
+        this.scale.width / 2,
+        this.scale.height / 2 + 80,
+        'Click to Restart',
+        {
+          fontFamily: 'monospace',
+          fontSize: 16,
+          color: '#ccc'
+        }
+      ).setOrigin(0.5);
+      
+      this.input.once('pointerdown', () => this.scene.restart());
+    }
+
+    createUI() {
+      this.speedText = this.add.text(16, 16, 'Speed: 0', {
+        fontFamily: 'monospace',
+        fontSize: 18,
+        color: '#fff',
+        backgroundColor: '#000',
+        padding: { x: 8, y: 4 }
+      });
+      
+      this.timeText = this.add.text(16, 48, 'Time: 0.0s', {
+        fontFamily: 'monospace',
+        fontSize: 18,
+        color: '#fff',
+        backgroundColor: '#000',
+        padding: { x: 8, y: 4 }
+      });
+      
+      this.lapText = this.add.text(16, 80, `Lap: 1/${this.totalLaps}`, {
+        fontFamily: 'monospace',
+        fontSize: 18,
+        color: '#ffff00',
+        backgroundColor: '#000',
+        padding: { x: 8, y: 4 }
+      });
+      
+      this.timer = this.time.addEvent({
+        delay: 50,
+        loop: true,
+        callback: () => {
+          const timeElapsed = ((this.time.now - this.lapStart) / 1000).toFixed(2);
+          this.timeText.setText('Time: ' + timeElapsed + 's');
+          this.speedText.setText('Speed: ' + Math.abs(Math.round(this.player.speed)));
+        }
+      });
+    }
+  }
+  </script>
+  <!-- REGION:SCENE_CLASS_END -->
+
+  <!-- REGION:CONFIG_START -->
+  <script>
+  const config = {
+    type: Phaser.AUTO,
+    width: 900,
+    height: 600,
+    backgroundColor: 0x0b0d10,
+    physics: {
+      default: 'arcade',
+      arcade: { 
+        gravity: { y: 0 }, 
+        debug: false 
+      }
+    },
+    scene: [RaceScene]
+  };
+  </script>
+  <!-- REGION:CONFIG_END -->
+
+  <!-- REGION:GAME_INIT_START -->
+  <script>
+  window.onload = () => {
+    const game = new Phaser.Game(config);
+  };
+  </script>
+  <!-- REGION:GAME_INIT_END -->
+
+</body>
+</html>
+"""
+
+TemplateType_TopDownArena pac_man(maze)="""
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Pac-Man Maze - Phaser Template</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html,body { margin:0; padding:0; background:#000; height:100%; }
+    .hint { position: absolute; right: 12px; top: 12px; color:#ddd; font-family: monospace; font-size:13px; background: rgba(0,0,0,0.25); padding:8px; border-radius:6px; z-index: 1000;}
+  </style>
+</head>
+<body>
+  <div class="hint">Arrow keys to move • Collect dots • Avoid ghosts • Power pellets let you eat ghosts!</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+
+  <!-- REGION:SCENE_CLASS_START -->
+  <script>
+  class MazeScene extends Phaser.Scene {
+    constructor() { super('MazeScene'); }
+    
+    preload() {
+      this.generateTextures();
+    }
+    
+    generateTextures() {
+      // Pac-Man texture
+      if (!this.textures.exists('pac')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xffcc00, 1);
+        g.slice(16, 16, 14, Phaser.Math.DegToRad(30), Phaser.Math.DegToRad(330), true);
+        g.fillPath();
+        g.generateTexture('pac', 32, 32);
+        g.destroy();
+      }
+
+      // Dot texture
+      if (!this.textures.exists('dot')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xffdd44, 1);
+        g.fillCircle(8, 8, 3);
+        g.generateTexture('dot', 16, 16);
+        g.destroy();
+      }
+
+      // Power pellet texture
+      if (!this.textures.exists('pellet')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xff00ff, 1);
+        g.fillCircle(16, 16, 8);
+        g.generateTexture('pellet', 32, 32);
+        g.destroy();
+      }
+
+      // Ghost textures
+      const ghostColors = [0xff5555, 0x55ffff, 0xff55ff, 0xffaa55];
+      ghostColors.forEach((color, i) => {
+        if (!this.textures.exists('ghost' + i)) {
+          const g = this.add.graphics();
+          g.fillStyle(color, 1);
+          g.fillRoundedRect(2, 2, 28, 28, 8);
+          g.fillStyle(0xffffff, 1);
+          g.fillCircle(10, 12, 4);
+          g.fillCircle(22, 12, 4);
+          g.fillStyle(0x000000, 1);
+          g.fillCircle(10, 12, 2);
+          g.fillCircle(22, 12, 2);
+          g.generateTexture('ghost' + i, 32, 32);
+          g.destroy();
+        }
+      });
+    }
+    
+    create() {
+      this.cellSize = 32;
+      this.moveSpeed = 100;
+      
+      this.createMaze();
+      this.createPlayer();
+      this.createGhosts();
+      this.createDots();
+      this.createUI();
+
+      this.cursors = this.input.keyboard.createCursorKeys();
+      
+      this.physics.add.overlap(this.player, this.dots, this.collectDot, null, this);
+      this.physics.add.collider(this.player, this.walls);
+      this.physics.add.collider(this.ghosts, this.walls);
+      this.physics.add.overlap(this.player, this.ghosts, this.hitGhost, null, this);
+      
+      this.powerMode = false;
+      this.powerTimer = null;
+    }
+
+    update() {
+      this.handlePlayerMovement();
+      this.updateGhosts();
+    }
+
+    createMaze() {
+      this.walls = this.physics.add.staticGroup();
+      
+      this.layout = [
+        '########################',
+        '#..........##..........#',
+        '#.####.###.##.###.####.#',
+        '#P.....................P#',
+        '#.####.#.######.#.####.#',
+        '#......#....##....#....#',
+        '######.#### ## ####.####',
+        '#......................#',
+        '########################'
+      ];
+      
+      this.layout.forEach((row, y) => {
+        row.split('').forEach((cell, x) => {
+          if (cell === '#') {
+            const block = this.add.rectangle(
+              x * this.cellSize + 16, 
+              y * this.cellSize + 16, 
+              this.cellSize, 
+              this.cellSize, 
+              0x2233aa
+            );
+            this.physics.add.existing(block, true);
+            this.walls.add(block);
+          }
+        });
+      });
+    }
+
+    createPlayer() {
+      this.player = this.physics.add.sprite(64, 64, 'pac');
+      this.player.setCollideWorldBounds(true);
+      this.player.body.setSize(28, 28).setOffset(2, 2);
+      this.player.direction = null;
+      this.player.nextDirection = null;
+    }
+
+    handlePlayerMovement() {
+      const p = this.player;
+      
+      // Queue next direction
+      if (this.cursors.left.isDown) p.nextDirection = 'left';
+      else if (this.cursors.right.isDown) p.nextDirection = 'right';
+      else if (this.cursors.up.isDown) p.nextDirection = 'up';
+      else if (this.cursors.down.isDown) p.nextDirection = 'down';
+      
+      // Try to change direction if at grid center
+      if (this.isNearGridCenter(p)) {
+        if (p.nextDirection && this.canMove(p, p.nextDirection)) {
+          p.direction = p.nextDirection;
+          p.nextDirection = null;
+        }
+      }
+      
+      // Move in current direction
+      p.body.setVelocity(0);
+      if (p.direction) {
+        if (this.canMove(p, p.direction)) {
+          switch (p.direction) {
+            case 'left':
+              p.body.setVelocityX(-this.moveSpeed);
+              p.setAngle(180);
+              break;
+            case 'right':
+              p.body.setVelocityX(this.moveSpeed);
+              p.setAngle(0);
+              break;
+            case 'up':
+              p.body.setVelocityY(-this.moveSpeed);
+              p.setAngle(-90);
+              break;
+            case 'down':
+              p.body.setVelocityY(this.moveSpeed);
+              p.setAngle(90);
+              break;
+          }
+        } else {
+          p.direction = null;
+        }
+      }
+    }
+
+    isNearGridCenter(sprite) {
+      const gridX = Math.round(sprite.x / this.cellSize) * this.cellSize;
+      const gridY = Math.round(sprite.y / this.cellSize) * this.cellSize;
+      const dx = Math.abs(sprite.x - gridX);
+      const dy = Math.abs(sprite.y - gridY);
+      return dx < 4 && dy < 4;
+    }
+
+    canMove(sprite, direction) {
+      const checkDist = this.cellSize;
+      let checkX = sprite.x;
+      let checkY = sprite.y;
+      
+      switch (direction) {
+        case 'left': checkX -= checkDist; break;
+        case 'right': checkX += checkDist; break;
+        case 'up': checkY -= checkDist; break;
+        case 'down': checkY += checkDist; break;
+      }
+      
+      const gridX = Math.floor(checkX / this.cellSize);
+      const gridY = Math.floor(checkY / this.cellSize);
+      
+      if (gridY < 0 || gridY >= this.layout.length || 
+          gridX < 0 || gridX >= this.layout[0].length) {
+        return false;
+      }
+      
+      return this.layout[gridY][gridX] !== '#';
+    }
+
+    createGhosts() {
+      this.ghosts = this.physics.add.group();
+      
+      const spawnPositions = [
+        { x: 11, y: 4, dir: 'left' },
+        { x: 12, y: 4, dir: 'right' },
+        { x: 11, y: 5, dir: 'up' },
+        { x: 12, y: 5, dir: 'down' }
+      ];
+      
+      for (let i = 0; i < 4; i++) {
+        const pos = spawnPositions[i];
+        const ghost = this.ghosts.create(
+          pos.x * this.cellSize + 16, 
+          pos.y * this.cellSize + 16, 
+          'ghost' + i
+        );
+        ghost.setCollideWorldBounds(true);
+        ghost.body.setSize(28, 28).setOffset(2, 2);
+        ghost.direction = pos.dir;
+        ghost.updateTimer = 0;
+        ghost.isVulnerable = false;
+      }
+    }
+
+    updateGhosts() {
+      this.ghosts.children.entries.forEach(ghost => {
+        if (!ghost.active) return;
+        
+        ghost.updateTimer++;
+        
+        // Update AI every 20 frames
+        if (ghost.updateTimer > 20) {
+          ghost.updateTimer = 0;
+          
+          if (this.isNearGridCenter(ghost)) {
+            if (!ghost.isVulnerable) {
+              this.ghostChaseAI(ghost);
+            } else {
+              this.ghostFleeAI(ghost);
+            }
+          }
+        }
+        
+        // Move in current direction
+        ghost.body.setVelocity(0);
+        const speed = ghost.isVulnerable ? 60 : 80;
+        
+        if (ghost.direction && this.canMove(ghost, ghost.direction)) {
+          switch (ghost.direction) {
+            case 'left': ghost.body.setVelocityX(-speed); break;
+            case 'right': ghost.body.setVelocityX(speed); break;
+            case 'up': ghost.body.setVelocityY(-speed); break;
+            case 'down': ghost.body.setVelocityY(speed); break;
+          }
+        } else {
+          this.ghostRandomDirection(ghost);
+        }
+      });
+    }
+
+    ghostChaseAI(ghost) {
+      const dx = this.player.x - ghost.x;
+      const dy = this.player.y - ghost.y;
+      
+      const directions = [];
+      if (Math.abs(dx) > Math.abs(dy)) {
+        directions.push(dx > 0 ? 'right' : 'left');
+        directions.push(dy > 0 ? 'down' : 'up');
+      } else {
+        directions.push(dy > 0 ? 'down' : 'up');
+        directions.push(dx > 0 ? 'right' : 'left');
+      }
+      
+      for (let dir of directions) {
+        if (this.canMove(ghost, dir)) {
+          ghost.direction = dir;
+          return;
+        }
+      }
+      
+      this.ghostRandomDirection(ghost);
+    }
+
+    ghostFleeAI(ghost) {
+      const dx = this.player.x - ghost.x;
+      const dy = this.player.y - ghost.y;
+      
+      const directions = [];
+      if (Math.abs(dx) > Math.abs(dy)) {
+        directions.push(dx > 0 ? 'left' : 'right');
+        directions.push(dy > 0 ? 'up' : 'down');
+      } else {
+        directions.push(dy > 0 ? 'up' : 'down');
+        directions.push(dx > 0 ? 'left' : 'right');
+      }
+      
+      for (let dir of directions) {
+        if (this.canMove(ghost, dir)) {
+          ghost.direction = dir;
+          return;
+        }
+      }
+      
+      this.ghostRandomDirection(ghost);
+    }
+
+    ghostRandomDirection(ghost) {
+      const validDirs = ['left', 'right', 'up', 'down']
+        .filter(dir => this.canMove(ghost, dir));
+      
+      if (validDirs.length > 0) {
+        ghost.direction = Phaser.Utils.Array.GetRandom(validDirs);
+      }
+    }
+
+    createDots() {
+      this.dots = this.physics.add.group();
+      
+      this.layout.forEach((row, y) => {
+        row.split('').forEach((cell, x) => {
+          if (cell === '.') {
+            const dot = this.dots.create(
+              x * this.cellSize + 16, 
+              y * this.cellSize + 16, 
+              'dot'
+            );
+            dot.body.setCircle(3);
+          } else if (cell === 'P') {
+            const pellet = this.dots.create(
+              x * this.cellSize + 16, 
+              y * this.cellSize + 16, 
+              'pellet'
+            );
+            pellet.isPowerPellet = true;
+            pellet.body.setCircle(8);
+            
+            // Pulse animation
+            this.tweens.add({
+              targets: pellet,
+              scale: 1.3,
+              duration: 400,
+              yoyo: true,
+              repeat: -1
+            });
+          }
+        });
+      });
+    }
+
+    collectDot(player, dot) {
+      dot.destroy();
+      
+      if (dot.isPowerPellet) {
+        this.score += 50;
+        this.activatePowerMode();
+      } else {
+        this.score += 10;
+      }
+      
+      this.scoreText.setText('Score: ' + this.score);
+      
+      if (this.dots.countActive() === 0) {
+        this.showGameOver(true);
+      }
+    }
+
+    activatePowerMode() {
+      this.powerMode = true;
+      
+      if (this.powerTimer) {
+        this.powerTimer.remove();
+      }
+      
+      this.ghosts.children.entries.forEach(ghost => {
+        if (ghost.active) {
+          ghost.isVulnerable = true;
+          ghost.setTint(0x0000ff);
+        }
+      });
+      
+      this.powerTimer = this.time.delayedCall(7000, () => {
+        this.powerMode = false;
+        this.ghosts.children.entries.forEach(ghost => {
+          if (ghost.active) {
+            ghost.isVulnerable = false;
+            ghost.clearTint();
+          }
+        });
+      });
+    }
+
+    hitGhost(player, ghost) {
+      if (this.powerMode && ghost.isVulnerable) {
+        // Eat ghost
+        ghost.setPosition(11.5 * this.cellSize, 4.5 * this.cellSize);
+        ghost.isVulnerable = false;
+        ghost.clearTint();
+        this.score += 200;
+        this.scoreText.setText('Score: ' + this.score);
+      } else if (!ghost.isVulnerable) {
+        // Game over
+        this.showGameOver(false);
+      }
+    }
+
+    createUI() {
+      this.score = 0;
+      this.scoreText = this.add.text(16, 16, 'Score: 0', {
+        fontFamily: 'monospace',
+        fontSize: 20,
+        color: '#fff',
+        backgroundColor: '#000',
+        padding: { x: 8, y: 4 }
+      });
+    }
+
+    showGameOver(win) {
+      this.physics.pause();
+      
+      const msg = win ? 'You Win!' : 'Game Over';
+      const color = win ? '#ffff00' : '#ff0000';
+      
+      this.add.text(
+        this.scale.width / 2,
+        this.scale.height / 2 - 30,
+        msg,
+        {
+          fontFamily: 'monospace',
+          fontSize: 48,
+          color: color,
+          stroke: '#000',
+          strokeThickness: 6
+        }
+      ).setOrigin(0.5);
+      
+      this.add.text(
+        this.scale.width / 2,
+        this.scale.height / 2 + 30,
+        `Final Score: ${this.score}`,
+        {
+          fontFamily: 'monospace',
+          fontSize: 24,
+          color: '#fff'
+        }
+      ).setOrigin(0.5);
+      
+      this.add.text(
+        this.scale.width / 2,
+        this.scale.height / 2 + 70,
+        'Click to Restart',
+        {
+          fontFamily: 'monospace',
+          fontSize: 16,
+          color: '#ccc'
+        }
+      ).setOrigin(0.5);
+      
+      this.input.once('pointerdown', () => this.scene.restart());
+    }
+  }
+  </script>
+  <!-- REGION:SCENE_CLASS_END -->
+
+  <!-- REGION:CONFIG_START -->
+  <script>
+  const config = {
+    type: Phaser.AUTO,
+    width: 768,
+    height: 288,
+    backgroundColor: 0x000000,
+    physics: {
+      default: 'arcade',
+      arcade: { 
+        gravity: { y: 0 }, 
+        debug: false 
+      }
+    },
+    scene: [MazeScene]
+  };
+  </script>
+  <!-- REGION:CONFIG_END -->
+
+  <!-- REGION:GAME_INIT_START -->
+  <script>
+  window.onload = () => {
+    const game = new Phaser.Game(config);
+  };
+  </script>
+  <!-- REGION:GAME_INIT_END -->
+
+</body>
+</html>
+
+"""
+
+TemplateType_TopDownArena Space_Shooter_Invaders="""
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Space Shooter - Phaser Template</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html,body { margin:0; padding:0; background:#000; height:100%; }
+    .hint { position: absolute; right: 12px; top: 12px; color:#ddd; font-family: monospace; font-size:13px; background: rgba(0,0,0,0.25); padding:8px; border-radius:6px; z-index: 1000;}
+  </style>
+</head>
+<body>
+  <div class="hint">← → to move • SPACE to shoot</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+
+  <!-- REGION:SCENE_CLASS_START -->
+  <script>
+  class SpaceScene extends Phaser.Scene {
+    constructor() { super('SpaceScene'); }
+    
+    preload() {
+      this.generateTextures();
+    }
+    
+    generateTextures() {
+      // Player ship texture
+      if (!this.textures.exists('ship')) {
+        const g = this.add.graphics();
+        g.fillStyle(0x00aaff, 1);
+        g.fillTriangle(20, 0, 40, 40, 0, 40);
+        g.generateTexture('ship', 40, 40);
+        g.destroy();
+      }
+
+      // Bullet texture
+      if (!this.textures.exists('bullet')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xffff66, 1);
+        g.fillCircle(4, 4, 4);
+        g.generateTexture('bullet', 8, 8);
+        g.destroy();
+      }
+
+      // Enemy texture
+      if (!this.textures.exists('enemy')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xff4444, 1);
+        g.fillRect(0, 0, 32, 24);
+        g.fillStyle(0xaa2222, 1);
+        g.fillCircle(8, 8, 4);
+        g.fillCircle(24, 8, 4);
+        g.generateTexture('enemy', 32, 24);
+        g.destroy();
+      }
+    }
+    
+    create() {
+      this.createPlayer();
+      this.createEnemies();
+      this.createUI();
+
+      this.cursors = this.input.keyboard.createCursorKeys();
+      this.keys = this.input.keyboard.addKeys('SPACE');
+
+      // Object pooling for bullets
+      this.bullets = this.physics.add.group({
+        defaultKey: 'bullet',
+        maxSize: 30
+      });
+      
+      this.lastFired = 0;
+      this.fireRate = 250;
+
+      this.physics.add.overlap(this.bullets, this.enemies, this.hitEnemy, null, this);
+      this.physics.add.overlap(this.player, this.enemies, this.hitPlayer, null, this);
+      
+      this.gameOver = false;
+      this.lives = 3;
+    }
+
+    update(time) {
+      if (this.gameOver) return;
+
+      this.updatePlayer();
+      this.updateEnemies();
+      this.cleanupBullets();
+      
+      if (this.keys.SPACE.isDown && time > this.lastFired + this.fireRate) {
+        this.shootBullet();
+        this.lastFired = time;
+      }
+    }
+
+    createPlayer() {
+      this.player = this.physics.add.sprite(400, 550, 'ship');
+      this.player.setCollideWorldBounds(true);
+      this.player.body.setSize(32, 32).setOffset(4, 4);
+      this.player.speed = 300;
+    }
+
+    updatePlayer() {
+      const p = this.player;
+      
+      if (this.cursors.left.isDown) {
+        p.setVelocityX(-p.speed);
+      } else if (this.cursors.right.isDown) {
+        p.setVelocityX(p.speed);
+      } else {
+        p.setVelocityX(0);
+      }
+    }
+
+    shootBullet() {
+      // Get bullet from pool or create new one
+      const bullet = this.bullets.get(this.player.x, this.player.y - 20);
+      
+      if (bullet) {
+        bullet.setActive(true);
+        bullet.setVisible(true);
+        bullet.setVelocityY(-400);
+        bullet.body.setSize(6, 6);
+      }
+    }
+
+    cleanupBullets() {
+      // Remove bullets that go off screen
+      this.bullets.children.entries.forEach(bullet => {
+        if (bullet.active && bullet.y < -10) {
+          bullet.setActive(false);
+          bullet.setVisible(false);
+          bullet.body.stop();
+        }
+      });
+    }
+
+    createEnemies() {
+      this.enemies = this.physics.add.group();
+      this.enemyDirection = 1;
+      this.enemySpeed = 30;
+      
+      for (let y = 0; y < 4; y++) {
+        for (let x = 0; x < 8; x++) {
+          const enemy = this.enemies.create(
+            100 + x * 80, 
+            80 + y * 50, 
+            'enemy'
+          );
+          enemy.body.setSize(28, 20).setOffset(2, 2);
+        }
+      }
+      
+      // Set initial group velocity
+      this.enemies.setVelocityX(this.enemySpeed * this.enemyDirection);
+    }
+
+    updateEnemies() {
+      if (this.enemies.countActive() === 0) return;
+
+      let changeDirection = false;
+      
+      this.enemies.children.entries.forEach(enemy => {
+        if (!enemy.active) return;
+        
+        // Check if any enemy hit the edge
+        if ((enemy.x >= 780 && this.enemyDirection > 0) || 
+            (enemy.x <= 20 && this.enemyDirection < 0)) {
+          changeDirection = true;
+        }
+      });
+      
+      if (changeDirection) {
+        this.enemyDirection *= -1;
+        this.enemies.children.entries.forEach(enemy => {
+          if (enemy.active) {
+            enemy.y += 10; // Move down
+            enemy.body.velocity.x = this.enemySpeed * this.enemyDirection;
+            
+            // Check if enemies reached player level
+            if (enemy.y > 500) {
+              this.showGameOver(false);
+            }
+          }
+        });
+      }
+    }
+
+    hitEnemy(bullet, enemy) {
+      // Deactivate bullet (return to pool)
+      bullet.setActive(false);
+      bullet.setVisible(false);
+      bullet.body.stop();
+      
+      // Destroy enemy
+      enemy.destroy();
+      
+      // Update score
+      this.score += 10;
+      this.scoreText.setText('Score: ' + this.score);
+      
+      // Create explosion effect
+      const explosion = this.add.circle(enemy.x, enemy.y, 20, 0xff8800, 0.8);
+      this.tweens.add({
+        targets: explosion,
+        alpha: 0,
+        scale: 2,
+        duration: 300,
+        onComplete: () => explosion.destroy()
+      });
+      
+      // Check win condition
+      if (this.enemies.countActive() === 0) {
+        this.showGameOver(true);
+      }
+    }
+
+    hitPlayer(player, enemy) {
+      if (this.gameOver) return;
+      
+      enemy.destroy();
+      this.lives--;
+      this.livesText.setText('Lives: ' + this.lives);
+      
+      // Flash player
+      player.setTint(0xff0000);
+      this.time.delayedCall(200, () => {
+        if (this.player) this.player.clearTint();
+      });
+      
+      // Check game over
+      if (this.lives <= 0) {
+        this.showGameOver(false);
+      }
+    }
+
+    createUI() {
+      this.score = 0;
+      this.scoreText = this.add.text(16, 16, 'Score: 0', {
+        fontFamily: 'monospace',
+        fontSize: 20,
+        color: '#fff',
+        backgroundColor: '#000',
+        padding: { x: 8, y: 4 }
+      });
+      
+      this.livesText = this.add.text(16, 48, 'Lives: 3', {
+        fontFamily: 'monospace',
+        fontSize: 20,
+        color: '#fff',
+        backgroundColor: '#000',
+        padding: { x: 8, y: 4 }
+      });
+    }
+
+    showGameOver(win) {
+      this.gameOver = true;
+      this.physics.pause();
+      
+      const msg = win ? 'Victory!' : 'Game Over';
+      const color = win ? '#00ff00' : '#ff0000';
+      
+      this.add.text(
+        400, 
+        250, 
+        msg, 
+        {
+          fontFamily: 'monospace',
+          fontSize: 48,
+          color: color,
+          stroke: '#000',
+          strokeThickness: 6
+        }
+      ).setOrigin(0.5);
+      
+      this.add.text(
+        400, 
+        320, 
+        `Final Score: ${this.score}`, 
+        {
+          fontFamily: 'monospace',
+          fontSize: 24,
+          color: '#fff'
+        }
+      ).setOrigin(0.5);
+      
+      this.add.text(
+        400, 
+        370, 
+        'Click to Restart', 
+        {
+          fontFamily: 'monospace',
+          fontSize: 18,
+          color: '#ccc'
+        }
+      ).setOrigin(0.5);
+      
+      this.input.once('pointerdown', () => this.scene.restart());
+    }
+  }
+  </script>
+  <!-- REGION:SCENE_CLASS_END -->
+
+  <!-- REGION:CONFIG_START -->
+  <script>
+  const config = {
+    type: Phaser.AUTO,
+    width: 800,
+    height: 600,
+    backgroundColor: 0x000000,
+    physics: { 
+      default: 'arcade', 
+      arcade: { 
+        gravity: { y: 0 },
+        debug: false 
+      } 
+    },
+    scene: [SpaceScene]
+  };
+  </script>
+  <!-- REGION:CONFIG_END -->
+
+  <!-- REGION:GAME_INIT_START -->
+  <script>
+  window.onload = () => {
+    const game = new Phaser.Game(config);
+  };
+  </script>
+  <!-- REGION:GAME_INIT_END -->
+
+</body>
+</html>
+
+"""
+
+TemplateType_TopDownArena Survival/Defense="""
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Survival / Defense - Phaser Template</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html,body { margin:0; padding:0; background:#222; height:100%; }
+    .hint { position: absolute; right: 12px; top: 12px; color:#ddd; font-family: monospace; font-size:13px; background: rgba(0,0,0,0.25); padding:8px; border-radius:6px; z-index: 1000;}
+  </style>
+</head>
+<body>
+  <div class="hint">Click to place turrets (costs 50 gold) • Defend base from enemies</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+
+  <!-- REGION:SCENE_CLASS_START -->
+  <script>
+  class DefenseScene extends Phaser.Scene {
+    constructor() { super('DefenseScene'); }
+    
+    preload() {
+      this.generateTextures();
+    }
+    
+    generateTextures() {
+      // Base texture
+      if (!this.textures.exists('base')) {
+        const g = this.add.graphics();
+        g.fillStyle(0x44cc44, 1);
+        g.fillRect(0, 0, 40, 120);
+        g.fillStyle(0x22aa22, 1);
+        g.fillRect(5, 10, 30, 100);
+        g.generateTexture('base', 40, 120);
+        g.destroy();
+      }
+
+      // Turret texture
+      if (!this.textures.exists('turret')) {
+        const g = this.add.graphics();
+        g.fillStyle(0x66aaff, 1);
+        g.fillCircle(12, 12, 12);
+        g.fillStyle(0x4488dd, 1);
+        g.fillCircle(12, 12, 7);
+        g.generateTexture('turret', 24, 24);
+        g.destroy();
+      }
+
+      // Bullet texture
+      if (!this.textures.exists('bullet')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xffff55, 1);
+        g.fillCircle(4, 4, 4);
+        g.generateTexture('bullet', 8, 8);
+        g.destroy();
+      }
+
+      // Enemy texture
+      if (!this.textures.exists('enemy')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xff4444, 1);
+        g.fillRect(0, 0, 30, 30);
+        g.fillStyle(0xaa2222, 1);
+        g.fillCircle(10, 10, 4);
+        g.fillCircle(20, 10, 4);
+        g.generateTexture('enemy', 30, 30);
+        g.destroy();
+      }
+    }
+    
+    create() {
+      this.enemies = this.physics.add.group();
+      this.turrets = this.physics.add.staticGroup();
+      this.bullets = this.physics.add.group({
+        defaultKey: 'bullet',
+        maxSize: 100
+      });
+
+      // Game state
+      this.state = 'SETUP'; // SETUP, SPAWNING, PLAYING, WAVE_COMPLETE, GAME_OVER
+      this.baseHealth = 10;
+      this.maxHealth = 10;
+      this.gold = 100;
+      this.score = 0;
+      this.wave = 1;
+      this.enemiesSpawned = 0;
+      this.enemiesKilled = 0;
+      this.turretCost = 50;
+      this.gameOverFlag = false;
+
+      this.createBase();
+      this.createUI();
+      this.startWaveTimer = 0;
+
+      this.input.on('pointerdown', this.placeTurret, this);
+      
+      this.physics.add.overlap(this.bullets, this.enemies, this.bulletHit, null, this);
+      this.physics.add.overlap(this.enemies, this.base, this.enemyReachedBase, null, this);
+
+      this.startWave();
+    }
+
+    update() {
+      if (this.gameOverFlag) return;
+
+      this.updateTurrets();
+      this.cleanupBullets();
+
+      // State machine
+      if (this.state === 'SPAWNING') {
+        // Spawning happens via timed events
+      } else if (this.state === 'PLAYING') {
+        // Check if wave is complete
+        if (this.enemiesSpawned > 0 && 
+            this.enemiesKilled === this.enemiesSpawned && 
+            this.enemies.countActive() === 0) {
+          this.completeWave();
+        }
+      } else if (this.state === 'WAVE_COMPLETE') {
+        this.startWaveTimer++;
+        if (this.startWaveTimer > 180) { // 3 seconds at 60fps
+          this.startWaveTimer = 0;
+          this.startWave();
+        }
+      }
+    }
+
+    createBase() {
+      this.base = this.add.sprite(this.scale.width - 40, this.scale.height / 2, 'base');
+      this.physics.add.existing(this.base, true);
+      this.base.body.setSize(40, 120);
+    }
+
+    placeTurret(pointer) {
+      // Can't place if not in PLAYING or SPAWNING state
+      if (this.state !== 'PLAYING' && this.state !== 'SPAWNING') return;
+      
+      // Check cost
+      if (this.gold < this.turretCost) {
+        this.showNotification('Not enough gold!', 0xff0000);
+        return;
+      }
+
+      // Prevent placing too close to base or outside bounds
+      if (pointer.x > this.scale.width - 120 || pointer.x < 50) {
+        this.showNotification('Invalid position!', 0xff0000);
+        return;
+      }
+      if (pointer.y < 50 || pointer.y > this.scale.height - 50) return;
+
+      // Check if turret already exists at this position
+      let canPlace = true;
+      this.turrets.children.entries.forEach(turret => {
+        const dist = Phaser.Math.Distance.Between(pointer.x, pointer.y, turret.x, turret.y);
+        if (dist < 50) canPlace = false;
+      });
+
+      if (!canPlace) {
+        this.showNotification('Too close to another turret!', 0xff0000);
+        return;
+      }
+
+      // Place turret
+      const turret = this.turrets.create(pointer.x, pointer.y, 'turret');
+      turret.body.setSize(20, 20);
+      turret.lastShot = 0;
+      turret.range = 140;
+      turret.fireRate = 500;
+      
+      this.gold -= this.turretCost;
+      this.updateUI();
+
+      // Visual feedback
+      this.tweens.add({
+        targets: turret,
+        scale: { from: 0.5, to: 1 },
+        duration: 300,
+        ease: 'Back.easeOut'
+      });
+
+      this.showNotification('Turret placed!', 0x00ff00);
+    }
+
+    updateTurrets() {
+      const now = this.time.now;
+      
+      this.turrets.children.entries.forEach(turret => {
+        if (!turret.active) return;
+
+        // Find closest enemy within range
+        let target = null;
+        let closestDist = turret.range;
+
+        this.enemies.children.entries.forEach(enemy => {
+          if (!enemy.active) return;
+          const dist = Phaser.Math.Distance.Between(turret.x, turret.y, enemy.x, enemy.y);
+          if (dist < closestDist) {
+            closestDist = dist;
+            target = enemy;
+          }
+        });
+
+        // Fire at target
+        if (target && now > turret.lastShot + turret.fireRate) {
+          this.fireBullet(turret, target);
+          turret.lastShot = now;
+          
+          // Visual effect
+          this.tweens.add({
+            targets: turret,
+            scale: 1.15,
+            duration: 80,
+            yoyo: true
+          });
+        }
+      });
+    }
+
+    fireBullet(turret, target) {
+      const bullet = this.bullets.get(turret.x, turret.y);
+      
+      if (bullet) {
+        bullet.setActive(true);
+        bullet.setVisible(true);
+        this.physics.moveToObject(bullet, target, 350);
+      }
+    }
+
+    cleanupBullets() {
+      this.bullets.children.entries.forEach(bullet => {
+        if (bullet.active && (bullet.x < -50 || bullet.x > this.scale.width + 50 || 
+                               bullet.y < -50 || bullet.y > this.scale.height + 50)) {
+          bullet.setActive(false);
+          bullet.setVisible(false);
+          bullet.body.stop();
+        }
+      });
+    }
+
+    startWave() {
+      this.state = 'SPAWNING';
+      const enemyCount = Math.floor(3 + this.wave * 2);
+      this.enemiesSpawned = 0;
+      this.enemiesKilled = 0;
+
+      this.waveText.setText(`Wave ${this.wave}`);
+      this.waveStatus.setText('Spawning...');
+
+      let spawnCount = 0;
+      this.time.addEvent({
+        delay: 800,
+        repeat: enemyCount - 1,
+        callback: () => {
+          spawnCount++;
+          this.spawnEnemy();
+          
+          if (spawnCount === enemyCount) {
+            this.state = 'PLAYING';
+            this.waveStatus.setText('In Progress');
+          }
+        }
+      });
+    }
+
+    spawnEnemy() {
+      const y = Phaser.Math.Between(80, this.scale.height - 80);
+      const enemy = this.enemies.create(10, y, 'enemy');
+      
+      const baseSpeed = 60 + this.wave * 8;
+      enemy.setVelocityX(baseSpeed);
+      enemy.hp = 1 + Math.floor((this.wave - 1) / 2);
+      enemy.maxHp = enemy.hp;
+      
+      this.enemiesSpawned++;
+    }
+
+    bulletHit(bullet, enemy) {
+      bullet.setActive(false);
+      bullet.setVisible(false);
+      bullet.body.stop();
+
+      enemy.hp -= 1;
+
+      // Visual feedback
+      enemy.setTint(0xff8888);
+      this.time.delayedCall(80, () => {
+        if (enemy.active) enemy.clearTint();
+      });
+
+      if (enemy.hp <= 0) {
+        const reward = 5 * this.wave;
+        this.gold += reward;
+        this.enemiesKilled++;
+        this.score += reward;
+        enemy.destroy();
+        this.updateUI();
+
+        // Gold popup
+        this.showGoldPopup(enemy.x, enemy.y, '+' + reward);
+      }
+    }
+
+    showGoldPopup(x, y, text) {
+      const popup = this.add.text(x, y, text, {
+        fontFamily: 'monospace',
+        fontSize: 20,
+        color: '#ffff00',
+        fontStyle: 'bold'
+      });
+
+      this.tweens.add({
+        targets: popup,
+        y: y - 40,
+        alpha: 0,
+        duration: 1000,
+        onComplete: () => popup.destroy()
+      });
+    }
+
+    showNotification(text, color) {
+      const notif = this.add.text(
+        this.scale.width / 2,
+        80,
+        text,
+        {
+          fontFamily: 'monospace',
+          fontSize: 18,
+          color: Phaser.Display.Color.IntegerToRGB(color).hexString()
+        }
+      ).setOrigin(0.5);
+
+      this.tweens.add({
+        targets: notif,
+        alpha: 0,
+        duration: 1500,
+        delay: 200,
+        onComplete: () => notif.destroy()
+      });
+    }
+
+    enemyReachedBase(base, enemy) {
+      enemy.destroy();
+      this.damageBase();
+    }
+
+    damageBase() {
+      this.baseHealth = Math.max(0, this.baseHealth - 1);
+      this.updateUI();
+      
+      // Visual feedback
+      this.tweens.add({
+        targets: this.base,
+        scaleX: 0.85,
+        duration: 100,
+        yoyo: true
+      });
+
+      this.showNotification('Base hit!', 0xff0000);
+
+      if (this.baseHealth <= 0) {
+        this.gameOver(false);
+      }
+    }
+
+    completeWave() {
+      this.state = 'WAVE_COMPLETE';
+      this.waveStatus.setText('Wave Complete!');
+
+      // Repair base
+      const oldHealth = this.baseHealth;
+      this.baseHealth = Math.min(this.maxHealth, this.baseHealth + 2);
+      
+      // Bonus gold
+      const bonus = 20 * this.wave;
+      this.gold += bonus;
+      this.score += bonus;
+      this.updateUI();
+
+      this.showNotification(`Wave ${this.wave} Complete! +${bonus} gold`, 0x00ff00);
+    }
+
+    createUI() {
+      // Top left info
+      this.waveText = this.add.text(16, 16, 'Wave 1', {
+        fontFamily: 'monospace',
+        fontSize: 24,
+        color: '#ffff00',
+        fontStyle: 'bold',
+        backgroundColor: '#000',
+        padding: { x: 12, y: 8 }
+      });
+
+      this.waveStatus = this.add.text(16, 50, 'Starting...', {
+        fontFamily: 'monospace',
+        fontSize: 16,
+        color: '#fff',
+        backgroundColor: '#000',
+        padding: { x: 8, y: 4 }
+      });
+
+      // Top right stats
+      this.healthText = this.add.text(this.scale.width - 250, 16, 'Base: 10/10 HP', {
+        fontFamily: 'monospace',
+        fontSize: 18,
+        color: '#44ff44',
+        backgroundColor: '#000',
+        padding: { x: 12, y: 8 }
+      }).setOrigin(1, 0);
+
+      this.goldText = this.add.text(this.scale.width - 250, 50, 'Gold: 100', {
+        fontFamily: 'monospace',
+        fontSize: 18,
+        color: '#ffff00',
+        backgroundColor: '#000',
+        padding: { x: 12, y: 8 }
+      }).setOrigin(1, 0);
+
+      // Bottom right score
+      this.scoreText = this.add.text(this.scale.width - 20, this.scale.height - 20, 'Score: 0', {
+        fontFamily: 'monospace',
+        fontSize: 16,
+        color: '#fff',
+        backgroundColor: '#000',
+        padding: { x: 8, y: 4 }
+      }).setOrigin(1, 1);
+
+      // Instructions
+      this.add.text(this.scale.width / 2, this.scale.height - 20, 'Click to place turrets (50 gold each)', {
+        fontFamily: 'monospace',
+        fontSize: 14,
+        color: '#aaa',
+        backgroundColor: '#000',
+        padding: { x: 8, y: 4 }
+      }).setOrigin(0.5, 1);
+    }
+
+    updateUI() {
+      this.healthText.setText(`Base: ${this.baseHealth}/${this.maxHealth} HP`);
+      this.goldText.setText(`Gold: ${this.gold}`);
+      this.scoreText.setText(`Score: ${this.score}`);
+    }
+
+    gameOver(win) {
+      this.gameOverFlag = true;
+      this.state = 'GAME_OVER';
+      this.physics.pause();
+
+      const msg = win ? 'Victory!' : 'Base Destroyed';
+      const color = win ? '#00ff00' : '#ff0000';
+
+      this.add.rectangle(this.scale.width / 2, this.scale.height / 2, 900, 600, 0x000000, 0.7);
+
+      this.add.text(
+        this.scale.width / 2,
+        this.scale.height / 2 - 80,
+        msg,
+        {
+          fontFamily: 'monospace',
+          fontSize: 56,
+          color: color,
+          fontStyle: 'bold'
+        }
+      ).setOrigin(0.5);
+
+      this.add.text(
+        this.scale.width / 2,
+        this.scale.height / 2,
+        `Final Score: ${this.score}\nWaves Survived: ${this.wave}`,
+        {
+          fontFamily: 'monospace',
+          fontSize: 28,
+          color: '#fff',
+          align: 'center'
+        }
+      ).setOrigin(0.5);
+
+      this.add.text(
+        this.scale.width / 2,
+        this.scale.height / 2 + 100,
+        'Click to Restart',
+        {
+          fontFamily: 'monospace',
+          fontSize: 18,
+          color: '#aaa'
+        }
+      ).setOrigin(0.5);
+
+      this.input.once('pointerdown', () => this.scene.restart());
+    }
+  }
+  </script>
+  <!-- REGION:SCENE_CLASS_END -->
+
+  <!-- REGION:CONFIG_START -->
+  <script>
+  const config = {
+    type: Phaser.AUTO,
+    width: 900,
+    height: 600,
+    backgroundColor: 0x111111,
+    physics: { 
+      default: 'arcade', 
+      arcade: { 
+        gravity: { y: 0 },
+        debug: false 
+      } 
+    },
+    scene: [DefenseScene]
+  };
+  </script>
+  <!-- REGION:CONFIG_END -->
+
+  <!-- REGION:GAME_INIT_START -->
+  <script>
+  window.onload = () => {
+    const game = new Phaser.Game(config);
+  };
+  </script>
+  <!-- REGION:GAME_INIT_END -->
+
+</body>
+</html>
+
+"""
+
+TemplateType_TopDownArena Breakout/BrickBreaker="""
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Breakout - Phaser Template</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html,body { margin:0; padding:0; background:#111; height:100%; }
+    .hint { position: absolute; right: 12px; top: 12px; color:#ddd; font-family: monospace; font-size:13px; background: rgba(0,0,0,0.25); padding:8px; border-radius:6px; z-index: 1000;}
+  </style>
+</head>
+<body>
+  <div class="hint">← → or Mouse to move • SPACE to launch • Break all bricks</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+
+  <!-- REGION:SCENE_CLASS_START -->
+  <script>
+  class BreakoutScene extends Phaser.Scene {
+    constructor() { super('BreakoutScene'); }
+    
+    preload() {
+      this.generateTextures();
+    }
+    
+    generateTextures() {
+      // Paddle texture
+      if (!this.textures.exists('paddle')) {
+        const g = this.add.graphics();
+        g.fillStyle(0x55aaff, 1);
+        g.fillRoundedRect(0, 0, 100, 20, 4);
+        g.generateTexture('paddle', 100, 20);
+        g.destroy();
+      }
+
+      // Ball texture
+      if (!this.textures.exists('ball')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xffee55, 1);
+        g.fillCircle(8, 8, 8);
+        g.generateTexture('ball', 16, 16);
+        g.destroy();
+      }
+
+      // Brick texture
+      if (!this.textures.exists('brick')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xcccccc, 1);
+        g.fillRoundedRect(0, 0, 60, 25, 3);
+        g.generateTexture('brick', 60, 25);
+        g.destroy();
+      }
+    }
+    
+    create() {
+      // Game state
+      this.state = 'READY'; // READY, PLAYING, LOST, WON, LEVEL_UP
+      this.level = 1;
+      this.lives = 3;
+      this.score = 0;
+      this.totalBricksDestroyed = 0;
+
+      this.createBricks();
+      this.createPaddle();
+      this.createBall();
+      this.createUI();
+
+      this.cursors = this.input.keyboard.createCursorKeys();
+      this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+
+      // Mouse control
+      this.input.on('pointermove', (pointer) => {
+        this.paddle.x = Phaser.Math.Clamp(pointer.x, 50, this.scale.width - 50);
+        if (this.ball.getData('onPaddle')) {
+          this.ball.x = this.paddle.x;
+        }
+      });
+
+      this.physics.add.collider(this.ball, this.bricks, this.hitBrick, null, this);
+      this.physics.add.collider(this.ball, this.paddle, this.hitPaddle, null, this);
+    }
+
+    update() {
+      if (this.state === 'READY') {
+        // Ball follows paddle
+        this.ball.x = this.paddle.x;
+        this.ball.y = this.paddle.y - 25;
+
+        // Keyboard paddle control
+        if (this.cursors.left.isDown) {
+          this.paddle.setVelocityX(-400);
+        } else if (this.cursors.right.isDown) {
+          this.paddle.setVelocityX(400);
+        } else {
+          this.paddle.setVelocityX(0);
+        }
+
+        // Launch ball with SPACE
+        if (this.spaceKey.isDown) {
+          this.ball.setVelocity(
+            Phaser.Math.Between(-150, 150),
+            -300
+          );
+          this.ball.setData('onPaddle', false);
+          this.state = 'PLAYING';
+          this.launchText.setVisible(false);
+        }
+      } else if (this.state === 'PLAYING') {
+        // Keyboard paddle control
+        if (this.cursors.left.isDown) {
+          this.paddle.setVelocityX(-400);
+        } else if (this.cursors.right.isDown) {
+          this.paddle.setVelocityX(400);
+        } else {
+          this.paddle.setVelocityX(0);
+        }
+
+        // Ball falls off screen
+        if (this.ball.y > 600) {
+          this.loseLife();
+        }
+      }
+    }
+
+    createPaddle() {
+      this.paddle = this.physics.add.sprite(this.scale.width / 2, 560, 'paddle');
+      this.paddle.setImmovable(true);
+      this.paddle.setCollideWorldBounds(true);
+      this.paddle.body.allowGravity = false;
+    }
+
+    createBall() {
+      this.ball = this.physics.add.sprite(this.scale.width / 2, 520, 'ball');
+      this.ball.setCollideWorldBounds(true);
+      this.ball.setBounce(1, 1);
+      this.ball.setData('onPaddle', true);
+    }
+
+    createBricks() {
+      this.bricks = this.physics.add.staticGroup();
+      const colors = [0xff5555, 0xffaa55, 0xffff55, 0x55ffaa, 0x55aaff];
+      
+      const bricksPerRow = 10;
+      const brickRows = 3 + Math.floor(this.level / 2);
+      const totalBricks = bricksPerRow * brickRows;
+
+      let brickCount = 0;
+      for (let y = 0; y < brickRows; y++) {
+        for (let x = 0; x < bricksPerRow; x++) {
+          const color = colors[y % colors.length];
+          const brick = this.bricks.create(70 + x * 70, 60 + y * 35, 'brick');
+          
+          // Color tint
+          brick.setTint(color);
+          brick.brickValue = 10 * (y + 1); // More points for lower bricks
+        }
+      }
+    }
+
+    hitBrick(ball, brick) {
+      brick.destroy();
+      this.score += brick.brickValue;
+      this.totalBricksDestroyed++;
+      this.scoreText.setText('Score: ' + this.score);
+
+      // Visual effect
+      const explosion = this.add.circle(brick.x, brick.y, 15, brick.tint, 0.8);
+      this.tweens.add({
+        targets: explosion,
+        alpha: 0,
+        scale: 2,
+        duration: 300,
+        onComplete: () => explosion.destroy()
+      });
+
+      // Check level completion
+      if (this.bricks.countActive() === 0) {
+        this.levelComplete();
+      }
+    }
+
+    hitPaddle(ball, paddle) {
+      // Calculate angle based on where ball hits paddle
+      let diff = ball.x - paddle.x;
+      
+      if (Math.abs(diff) < 5) {
+        // Ball near center - bounce straight up with slight variation
+        ball.setVelocityX(Phaser.Math.Between(-50, 50));
+        ball.setVelocityY(-Math.abs(ball.body.velocity.y));
+      } else {
+        // Ball on side - bounce at angle
+        diff = Phaser.Math.Clamp(diff, -50, 50);
+        ball.setVelocityX(diff * 6);
+        ball.setVelocityY(-Math.abs(ball.body.velocity.y));
+      }
+
+      // Speed up slightly
+      const speed = Math.sqrt(
+        ball.body.velocity.x ** 2 + ball.body.velocity.y ** 2
+      );
+      const maxSpeed = 300 + this.level * 20;
+      if (speed > maxSpeed) {
+        const scale = maxSpeed / speed;
+        ball.setVelocity(
+          ball.body.velocity.x * scale,
+          ball.body.velocity.y * scale
+        );
+      }
+    }
+
+    loseLife() {
+      this.lives--;
+      this.livesText.setText('Lives: ' + this.lives);
+
+      if (this.lives <= 0) {
+        this.gameOver(false);
+      } else {
+        this.state = 'READY';
+        this.launchText.setVisible(true);
+        this.ball.setVelocity(0);
+        this.ball.setData('onPaddle', true);
+      }
+    }
+
+    levelComplete() {
+      this.state = 'LEVEL_UP';
+      this.physics.pause();
+
+      const bonus = 100 * this.level;
+      this.score += bonus;
+
+      this.add.text(
+        this.scale.width / 2,
+        this.scale.height / 2,
+        `Level ${this.level} Complete!\n\n+${bonus} Bonus\n\nClick to continue`,
+        {
+          fontFamily: 'monospace',
+          fontSize: 28,
+          color: '#ffff00',
+          align: 'center',
+          backgroundColor: '#000',
+          padding: { x: 20, y: 20 }
+        }
+      ).setOrigin(0.5);
+
+      this.input.once('pointerdown', () => {
+        this.level++;
+        this.scene.restart();
+      });
+    }
+
+    gameOver(win) {
+      this.state = 'GAME_OVER';
+      this.physics.pause();
+
+      const msg = win ? 'Victory!' : 'Game Over';
+      const color = win ? '#00ff00' : '#ff0000';
+
+      this.add.rectangle(this.scale.width / 2, this.scale.height / 2, 800, 600, 0x000000, 0.8);
+
+      this.add.text(
+        this.scale.width / 2,
+        this.scale.height / 2 - 80,
+        msg,
+        {
+          fontFamily: 'monospace',
+          fontSize: 56,
+          color: color,
+          fontStyle: 'bold'
+        }
+      ).setOrigin(0.5);
+
+      this.add.text(
+        this.scale.width / 2,
+        this.scale.height / 2,
+        `Score: ${this.score}\nLevel: ${this.level}\nBricks Destroyed: ${this.totalBricksDestroyed}`,
+        {
+          fontFamily: 'monospace',
+          fontSize: 24,
+          color: '#fff',
+          align: 'center'
+        }
+      ).setOrigin(0.5);
+
+      this.add.text(
+        this.scale.width / 2,
+        this.scale.height / 2 + 100,
+        'Click to Restart',
+        {
+          fontFamily: 'monospace',
+          fontSize: 18,
+          color: '#aaa'
+        }
+      ).setOrigin(0.5);
+
+      this.input.once('pointerdown', () => {
+        this.level = 1;
+        this.lives = 3;
+        this.score = 0;
+        this.totalBricksDestroyed = 0;
+        this.scene.restart();
+      });
+    }
+
+    createUI() {
+      this.scoreText = this.add.text(16, 16, 'Score: 0', {
+        fontFamily: 'monospace',
+        fontSize: 20,
+        color: '#fff',
+        backgroundColor: '#000',
+        padding: { x: 12, y: 8 }
+      });
+
+      this.livesText = this.add.text(16, 50, 'Lives: 3', {
+        fontFamily: 'monospace',
+        fontSize: 20,
+        color: '#ff5555',
+        backgroundColor: '#000',
+        padding: { x: 12, y: 8 }
+      });
+
+      this.add.text(this.scale.width - 20, 16, `Level: ${this.level}`, {
+        fontFamily: 'monospace',
+        fontSize: 20,
+        color: '#ffff00',
+        backgroundColor: '#000',
+        padding: { x: 12, y: 8 }
+      }).setOrigin(1, 0);
+
+      this.launchText = this.add.text(
+        this.scale.width / 2,
+        this.scale.height - 40,
+        'Press SPACE to Launch',
+        {
+          fontFamily: 'monospace',
+          fontSize: 18,
+          color: '#55ff55',
+          backgroundColor: '#000',
+          padding: { x: 12, y: 8 }
+        }
+      ).setOrigin(0.5);
+    }
+  }
+  </script>
+  <!-- REGION:SCENE_CLASS_END -->
+
+  <!-- REGION:CONFIG_START -->
+  <script>
+  const config = {
+    type: Phaser.AUTO,
+    width: 800,
+    height: 600,
+    backgroundColor: 0x000000,
+    physics: {
+      default: 'arcade',
+      arcade: {
+        gravity: { y: 0 },
+        debug: false
+      }
+    },
+    scene: [BreakoutScene]
+  };
+  </script>
+  <!-- REGION:CONFIG_END -->
+
+  <!-- REGION:GAME_INIT_START -->
+  <script>
+  window.onload = () => {
+    const game = new Phaser.Game(config);
+  };
+  </script>
+  <!-- REGION:GAME_INIT_END -->
+
+</body>
+</html>
+
+"""
+TemplateType_TopDownArena sport/Football_game="""
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Sports / Ball Game - Phaser Template</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html,body { margin:0; padding:0; background:#0b6623; height:100%; }
+    .hint { position:absolute; right:12px; top:12px; color:#ddd; font-family:monospace; font-size:13px; background:rgba(0,0,0,0.25); padding:8px; border-radius:6px; z-index: 1000;}
+  </style>
+</head>
+<body>
+  <div class="hint">WASD to move • Push the ball into the RIGHT goal!</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+
+  <!-- REGION:SCENE_CLASS_START -->
+  <script>
+  class SportsScene extends Phaser.Scene {
+    constructor() { super('SportsScene'); }
+    
+    preload() {
+      this.generateTextures();
+    }
+    
+    generateTextures() {
+      // Player texture
+      if (!this.textures.exists('player')) {
+        const g = this.add.graphics();
+        g.fillStyle(0x55aaff, 1);
+        g.fillCircle(20, 20, 18);
+        g.fillStyle(0x2255dd, 1);
+        g.fillCircle(20, 20, 10);
+        g.generateTexture('player', 40, 40);
+        g.destroy();
+      }
+
+      // AI player texture
+      if (!this.textures.exists('ai')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xff5555, 1);
+        g.fillCircle(20, 20, 18);
+        g.fillStyle(0xdd2222, 1);
+        g.fillCircle(20, 20, 10);
+        g.generateTexture('ai', 40, 40);
+        g.destroy();
+      }
+
+      // Ball texture
+      if (!this.textures.exists('ball')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xffffff, 1);
+        g.fillCircle(15, 15, 14);
+        g.fillStyle(0xffff00, 1);
+        g.fillCircle(15, 15, 8);
+        g.generateTexture('ball', 30, 30);
+        g.destroy();
+      }
+    }
+    
+    create() {
+      this.score = { player: 0, ai: 0 };
+      this.gameTime = 300; // 5 minutes in seconds
+      this.gameActive = true;
+
+      this.createField();
+      this.createPlayer();
+      this.createAI();
+      this.createBall();
+      this.createGoals();
+      this.createUI();
+
+      this.keys = this.input.keyboard.addKeys('W,A,S,D');
+
+      // Collisions
+      this.physics.add.collider(this.player, this.ball);
+      this.physics.add.collider(this.ai, this.ball);
+      this.physics.add.overlap(this.ball, this.goalLeft, this.goalScored, null, this);
+      this.physics.add.overlap(this.ball, this.goalRight, this.goalScored, null, this);
+
+      // Timer
+      this.time.addEvent({
+        delay: 1000,
+        loop: true,
+        callback: () => {
+          if (this.gameActive && this.gameTime > 0) {
+            this.gameTime--;
+            this.updateTimer();
+            if (this.gameTime <= 0) {
+              this.endGame();
+            }
+          }
+        }
+      });
+    }
+
+    update() {
+      if (!this.gameActive) return;
+
+      this.updatePlayer();
+      this.updateAI();
+      
+      // Keep ball in bounds
+      if (this.ball.x < 20) this.ball.x = 20;
+      if (this.ball.x > this.scale.width - 20) this.ball.x = this.scale.width - 20;
+      if (this.ball.y < 20) this.ball.y = 20;
+      if (this.ball.y > this.scale.height - 20) this.ball.y = this.scale.height - 20;
+
+      // Apply friction
+      this.ball.setVelocity(
+        this.ball.body.velocity.x * 0.98,
+        this.ball.body.velocity.y * 0.98
+      );
+    }
+
+    createField() {
+      // Field background
+      this.add.rectangle(
+        this.scale.width / 2,
+        this.scale.height / 2,
+        this.scale.width - 40,
+        this.scale.height - 40,
+        0x0a5520
+      ).setStrokeStyle(4, 0xffffff);
+
+      // Center line
+      this.add.line(
+        this.scale.width / 2,
+        20,
+        this.scale.width / 2,
+        this.scale.height - 20,
+        0xffffff
+      ).setLineWidth(2);
+
+      // Center circle
+      this.add.circle(
+        this.scale.width / 2,
+        this.scale.height / 2,
+        60,
+        0x0a5520
+      ).setStrokeStyle(2, 0xffffff);
+
+      // Center spot
+      this.add.circle(
+        this.scale.width / 2,
+        this.scale.height / 2,
+        4,
+        0xffffff
+      );
+    }
+
+    createPlayer() {
+      this.player = this.physics.add.sprite(150, this.scale.height / 2, 'player');
+      this.player.setCollideWorldBounds(true);
+      this.player.setBounce(0.5);
+      this.player.speed = 280;
+    }
+
+    createAI() {
+      this.ai = this.physics.add.sprite(this.scale.width - 150, this.scale.height / 2, 'ai');
+      this.ai.setCollideWorldBounds(true);
+      this.ai.setBounce(0.5);
+      this.ai.speed = 200;
+      this.ai.reaction = 0;
+    }
+
+    createBall() {
+      this.ball = this.physics.add.sprite(this.scale.width / 2, this.scale.height / 2, 'ball');
+      this.ball.setBounce(0.9, 0.9);
+      this.ball.setCollideWorldBounds(true);
+      this.ball.setDrag(0.99);
+    }
+
+    createGoals() {
+      // Left goal (AI scores here)
+      this.goalLeft = this.add.zone(20, this.scale.height / 2, 40, 160);
+      this.physics.world.enable(this.goalLeft);
+      this.goalLeft.body.setAllowGravity(false);
+      this.goalLeft.isLeft = true;
+
+      // Right goal (Player scores here)
+      this.goalRight = this.add.zone(this.scale.width - 20, this.scale.height / 2, 40, 160);
+      this.physics.world.enable(this.goalRight);
+      this.goalRight.body.setAllowGravity(false);
+      this.goalRight.isLeft = false;
+
+      // Goal posts
+      this.add.rectangle(30, this.scale.height / 2 - 80, 20, 20, 0xcccccc);
+      this.add.rectangle(30, this.scale.height / 2 + 80, 20, 20, 0xcccccc);
+      this.add.rectangle(this.scale.width - 30, this.scale.height / 2 - 80, 20, 20, 0xcccccc);
+      this.add.rectangle(this.scale.width - 30, this.scale.height / 2 + 80, 20, 20, 0xcccccc);
+    }
+
+    updatePlayer() {
+      this.player.body.setVelocity(0);
+
+      if (this.keys.W.isDown) {
+        this.player.body.setVelocityY(-this.player.speed);
+      }
+      if (this.keys.S.isDown) {
+        this.player.body.setVelocityY(this.player.speed);
+      }
+      if (this.keys.A.isDown) {
+        this.player.body.setVelocityX(-this.player.speed);
+      }
+      if (this.keys.D.isDown) {
+        this.player.body.setVelocityX(this.player.speed);
+      }
+    }
+
+    updateAI() {
+      this.ai.reaction++;
+
+      // AI decides every 20 frames
+      if (this.ai.reaction > 20) {
+        this.ai.reaction = 0;
+
+        const dx = this.ball.x - this.ai.x;
+        const dy = this.ball.y - this.ai.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        // Chase ball when close
+        if (dist < 200) {
+          this.ai.body.setVelocity(
+            Math.sign(dx) * this.ai.speed * 0.8,
+            Math.sign(dy) * this.ai.speed * 0.8
+          );
+        } else {
+          // Return to center
+          const centerY = this.scale.height / 2;
+          this.ai.body.setVelocity(
+            0,
+            Math.sign(centerY - this.ai.y) * this.ai.speed * 0.5
+          );
+        }
+      }
+
+      // Keep in bounds
+      if (this.ai.y < 50) this.ai.y = 50;
+      if (this.ai.y > this.scale.height - 50) this.ai.y = this.scale.height - 50;
+    }
+
+    goalScored(ball, goal) {
+      if (goal.isLeft) {
+        // AI scored
+        this.score.ai++;
+        this.updateScore();
+      } else {
+        // Player scored
+        this.score.player++;
+        this.updateScore();
+      }
+
+      // Reset positions
+      this.ball.setPosition(this.scale.width / 2, this.scale.height / 2);
+      this.ball.setVelocity(0, 0);
+      this.player.setPosition(150, this.scale.height / 2);
+      this.ai.setPosition(this.scale.width - 150, this.scale.height / 2);
+
+      // Visual effect
+      const goal_circle = this.add.circle(goal.x, goal.y, 40, 0xffff00, 0.6);
+      this.tweens.add({
+        targets: goal_circle,
+        alpha: 0,
+        scale: 2,
+        duration: 400,
+        onComplete: () => goal_circle.destroy()
+      });
+    }
+
+    updateScore() {
+      this.scoreText.setText(
+        `Player: ${this.score.player}  vs  AI: ${this.score.ai}`
+      );
+    }
+
+    updateTimer() {
+      const minutes = Math.floor(this.gameTime / 60);
+      const seconds = this.gameTime % 60;
+      this.timerText.setText(
+        `Time: ${minutes}:${seconds.toString().padStart(2, '0')}`
+      );
+    }
+
+    createUI() {
+      this.scoreText = this.add.text(
+        this.scale.width / 2,
+        20,
+        'Player: 0  vs  AI: 0',
+        {
+          fontFamily: 'monospace',
+          fontSize: 24,
+          color: '#fff',
+          fontStyle: 'bold'
+        }
+      ).setOrigin(0.5, 0);
+
+      this.timerText = this.add.text(
+        this.scale.width / 2,
+        60,
+        'Time: 5:00',
+        {
+          fontFamily: 'monospace',
+          fontSize: 20,
+          color: '#ffff00'
+        }
+      ).setOrigin(0.5, 0);
+    }
+
+    endGame() {
+      this.gameActive = false;
+      this.physics.pause();
+
+      const winner = this.score.player > this.score.ai
+        ? 'You Win!'
+        : this.score.player < this.score.ai
+        ? 'AI Wins!'
+        : 'Tie!';
+
+      const color = this.score.player > this.score.ai ? '#00ff00' : '#ff0000';
+
+      this.add.rectangle(
+        this.scale.width / 2,
+        this.scale.height / 2,
+        900,
+        600,
+        0x000000,
+        0.8
+      );
+
+      this.add.text(
+        this.scale.width / 2,
+        this.scale.height / 2 - 80,
+        winner,
+        {
+          fontFamily: 'monospace',
+          fontSize: 56,
+          color: color,
+          fontStyle: 'bold'
+        }
+      ).setOrigin(0.5);
+
+      this.add.text(
+        this.scale.width / 2,
+        this.scale.height / 2 + 20,
+        `Final Score: ${this.score.player} - ${this.score.ai}`,
+        {
+          fontFamily: 'monospace',
+          fontSize: 28,
+          color: '#fff'
+        }
+      ).setOrigin(0.5);
+
+      this.add.text(
+        this.scale.width / 2,
+        this.scale.height / 2 + 80,
+        'Click to Restart',
+        {
+          fontFamily: 'monospace',
+          fontSize: 18,
+          color: '#aaa'
+        }
+      ).setOrigin(0.5);
+
+      this.input.once('pointerdown', () => this.scene.restart());
+    }
+  }
+  </script>
+  <!-- REGION:SCENE_CLASS_END -->
+
+  <!-- REGION:CONFIG_START -->
+  <script>
+  const config = {
+    type: Phaser.AUTO,
+    width: 900,
+    height: 600,
+    backgroundColor: 0x0b6623,
+    physics: {
+      default: 'arcade',
+      arcade: {
+        gravity: { y: 0 },
+        debug: false
+      }
+    },
+    scene: [SportsScene]
+  };
+  </script>
+  <!-- REGION:CONFIG_END -->
+
+  <!-- REGION:GAME_INIT_START -->
+  <script>
+  window.onload = () => {
+    const game = new Phaser.Game(config);
+  };
+  </script>
+  <!-- REGION:GAME_INIT_END -->
+
+</body>
+</html>
+"""
+
+TemplateType_TopDownArena Idle/Incremental_Game="""
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Idle / Incremental - Phaser Template</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html,body { margin:0; padding:0; background:#111; height:100%; font-family: monospace; }
+    .hint { position:absolute; right:12px; top:12px; color:#ddd; font-family:monospace; font-size:13px; background:rgba(0,0,0,0.25); padding:8px; border-radius:6px; z-index: 1000;}
+  </style>
+</head>
+<body>
+  <div class="hint">Click the coin • Buy upgrades • Progress automatically</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+
+  <!-- REGION:SCENE_CLASS_START -->
+  <script>
+  class IdleScene extends Phaser.Scene {
+    constructor() { super('IdleScene'); }
+    
+    preload() {
+      this.generateTextures();
+    }
+    
+    generateTextures() {
+      // Coin texture
+      if (!this.textures.exists('coin')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xffcc33, 1);
+        g.fillCircle(60, 60, 58);
+        g.lineStyle(6, 0xffffff);
+        g.strokeCircle(60, 60, 58);
+        g.fillStyle(0xffaa00, 1);
+        g.fillCircle(60, 60, 35);
+        g.generateTexture('coin', 120, 120);
+        g.destroy();
+      }
+    }
+    
+    create() {
+      // Initialize upgrade buttons array FIRST
+      this.upgradeButtons = [];
+
+      // Load game state
+      this.loadGameState();
+
+      this.createCoin();
+      this.createUI();
+      this.createUpgrades();
+
+      // Auto-save every 10 seconds
+      this.time.addEvent({
+        delay: 10000,
+        loop: true,
+        callback: () => this.saveGameState()
+      });
+
+      // Passive income timer
+      this.lastPassiveTime = 0;
+    }
+
+    update(time) {
+      // Passive income (dps)
+      if (time - this.lastPassiveTime > 1000 && this.gameState.dps > 0) {
+        this.gameState.gold += this.gameState.dps;
+        this.updateUI();
+        this.lastPassiveTime = time;
+      }
+    }
+
+    loadGameState() {
+      const saved = localStorage.getItem('idleGameSave');
+      
+      if (saved) {
+        this.gameState = JSON.parse(saved);
+      } else {
+        this.gameState = {
+          gold: 0,
+          clickPower: 1,
+          dps: 0,
+          totalClicks: 0,
+          upgrades: {
+            clickPower: 0,
+            autoClicker: 0,
+            dpsBoost: 0
+          }
+        };
+      }
+    }
+
+    saveGameState() {
+      localStorage.setItem('idleGameSave', JSON.stringify(this.gameState));
+    }
+
+    createCoin() {
+      this.coin = this.add.sprite(400, 250, 'coin').setInteractive();
+      
+      // Add dollar sign text on top of coin
+      this.coinText = this.add.text(400, 250, '$', {
+        fontFamily: 'Arial',
+        fontSize: 48,
+        color: '#ffffff',
+        fontStyle: 'bold'
+      }).setOrigin(0.5);
+      
+      this.coin.on('pointerdown', () => {
+        this.gameState.gold += this.gameState.clickPower;
+        this.gameState.totalClicks++;
+        this.updateUI();
+        this.flashCoin();
+      });
+
+      this.coin.on('pointerover', () => {
+        this.coin.setScale(1.1);
+        this.coinText.setScale(1.1);
+      });
+
+      this.coin.on('pointerout', () => {
+        this.coin.setScale(1);
+        this.coinText.setScale(1);
+      });
+    }
+
+    flashCoin() {
+      this.tweens.add({
+        targets: [this.coin, this.coinText],
+        scale: 1.3,
+        duration: 80,
+        yoyo: true
+      });
+
+      // Floating text
+      const floating = this.add.text(
+        this.coin.x,
+        this.coin.y - 80,
+        '+' + this.gameState.clickPower,
+        {
+          fontFamily: 'monospace',
+          fontSize: 32,
+          color: '#ffff00',
+          fontStyle: 'bold'
+        }
+      ).setOrigin(0.5);
+
+      this.tweens.add({
+        targets: floating,
+        y: floating.y - 60,
+        alpha: 0,
+        duration: 800,
+        onComplete: () => floating.destroy()
+      });
+    }
+
+    createUpgrades() {
+      const upgrades = [
+        {
+          name: '+1 Click Power',
+          cost: 10,
+          type: 'clickPower',
+          x: 120
+        },
+        {
+          name: '+1 Auto-Clicker',
+          cost: 50,
+          type: 'autoClicker',
+          x: 340
+        },
+        {
+          name: '+5 DPS Boost',
+          cost: 100,
+          type: 'dpsBoost',
+          x: 560
+        }
+      ];
+
+      upgrades.forEach((upgrade) => {
+        const button = this.add.text(
+          upgrade.x,
+          500,
+          upgrade.name + '\nCost: ' + upgrade.cost,
+          {
+            fontFamily: 'monospace',
+            fontSize: 14,
+            color: '#fff',
+            align: 'center',
+            backgroundColor: '#2255dd',
+            padding: { x: 12, y: 8 }
+          }
+        ).setInteractive();
+
+        button.upgrade = upgrade;
+        
+        button.on('pointerdown', () => this.buyUpgrade(upgrade, button));
+        button.on('pointerover', () => {
+          button.setBackgroundColor('#4488ff');
+          button.setScale(1.05);
+        });
+        button.on('pointerout', () => {
+          button.setBackgroundColor('#2255dd');
+          button.setScale(1);
+        });
+
+        this.upgradeButtons.push({ button, upgrade });
+      });
+    }
+
+    buyUpgrade(upgrade, button) {
+      if (this.gameState.gold >= upgrade.cost) {
+        this.gameState.gold -= upgrade.cost;
+
+        switch (upgrade.type) {
+          case 'clickPower':
+            this.gameState.clickPower += 1;
+            this.gameState.upgrades.clickPower++;
+            break;
+          case 'autoClicker':
+            this.gameState.dps += 1;
+            this.gameState.upgrades.autoClicker++;
+            break;
+          case 'dpsBoost':
+            this.gameState.dps += 5;
+            this.gameState.upgrades.dpsBoost++;
+            break;
+        }
+
+        this.updateUI();
+        this.saveGameState();
+
+        // Visual feedback
+        this.tweens.add({
+          targets: button,
+          scaleX: 1.1,
+          scaleY: 1.1,
+          duration: 100,
+          yoyo: true
+        });
+      } else {
+        // Can't afford - flash red
+        button.setBackgroundColor('#dd2255');
+        this.time.delayedCall(200, () => {
+          button.setBackgroundColor('#2255dd');
+        });
+      }
+    }
+
+    createUI() {
+      // Main stats
+      this.goldText = this.add.text(450, 60, 'Gold: 0', {
+        fontFamily: 'monospace',
+        fontSize: 32,
+        color: '#ffff00',
+        fontStyle: 'bold',
+        align: 'left'
+      });
+
+      this.statsText = this.add.text(450, 110, 'Click Power: 1\nDPS: 0\nTotal Clicks: 0', {
+        fontFamily: 'monospace',
+        fontSize: 14,
+        color: '#aaa',
+        align: 'left'
+      });
+
+      this.updateUI();
+    }
+
+    updateUI() {
+      this.goldText.setText('Gold: ' + Math.floor(this.gameState.gold));
+      this.statsText.setText(
+        `Click Power: ${this.gameState.clickPower}\n` +
+        `DPS: ${this.gameState.dps}\n` +
+        `Total Clicks: ${this.gameState.totalClicks}`
+      );
+
+      // Update upgrade button affordability (only if buttons exist)
+      if (this.upgradeButtons && this.upgradeButtons.length > 0) {
+        this.upgradeButtons.forEach(({ button, upgrade }) => {
+          if (this.gameState.gold >= upgrade.cost) {
+            button.setColor('#fff');
+          } else {
+            button.setColor('#888');
+          }
+        });
+      }
+    }
+  }
+  </script>
+  <!-- REGION:SCENE_CLASS_END -->
+
+  <!-- REGION:CONFIG_START -->
+  <script>
+  const config = {
+    type: Phaser.AUTO,
+    width: 900,
+    height: 600,
+    backgroundColor: 0x111111,
+    scene: [IdleScene]
+  };
+  </script>
+  <!-- REGION:CONFIG_END -->
+
+  <!-- REGION:GAME_INIT_START -->
+  <script>
+  window.onload = () => {
+    const game = new Phaser.Game(config);
+  };
+  </script>
+  <!-- REGION:GAME_INIT_END -->
+
+</body>
+</html>
+"""
+
+
+TemplateType_TopDownArena camping_game="""
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Camping Adventure - Phaser Game</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html,body { margin:0; padding:0; background:#021; height:100%; }
+    .hint { position:absolute; right:12px; top:12px; color:#ddd; font-family:monospace; font-size:13px; background:rgba(0,0,0,0.25); padding:8px; border-radius:6px; z-index: 1000;}
+  </style>
+</head>
+<body>
+  <div class="hint">WASD to move • Collect wood (3) and berries (2) • Light the fire!</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+
+  <!-- REGION:SCENE_CLASS_START -->
+  <script>
+  class CampingScene extends Phaser.Scene {
+    constructor() { super('CampingScene'); }
+    
+    preload() {
+      this.generateTextures();
+    }
+    
+    generateTextures() {
+      // Player texture
+      if (!this.textures.exists('player')) {
+        const g = this.add.graphics();
+        g.fillStyle(0x55aaff, 1);
+        g.fillCircle(16, 16, 14);
+        g.fillStyle(0x2255dd, 1);
+        g.fillCircle(12, 12, 6);
+        g.fillCircle(20, 12, 6);
+        g.generateTexture('player', 32, 32);
+        g.destroy();
+      }
+
+      // Wood texture
+      if (!this.textures.exists('wood')) {
+        const g = this.add.graphics();
+        g.fillStyle(0x8b4513, 1);
+        g.fillRect(0, 0, 20, 12);
+        g.generateTexture('wood', 20, 12);
+        g.destroy();
+      }
+
+      // Berries texture
+      if (!this.textures.exists('berries')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xff3366, 1);
+        g.fillCircle(10, 10, 8);
+        g.generateTexture('berries', 20, 20);
+        g.destroy();
+      }
+
+      // Campfire texture (unlit)
+      if (!this.textures.exists('campfire')) {
+        const g = this.add.graphics();
+        g.fillStyle(0x333333, 1);
+        g.fillCircle(20, 20, 18);
+        g.fillStyle(0x666666, 1);
+        g.fillCircle(20, 20, 12);
+        g.generateTexture('campfire', 40, 40);
+        g.destroy();
+      }
+
+      // Campfire lit texture
+      if (!this.textures.exists('campfireLit')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xff6600, 1);
+        g.fillCircle(20, 20, 18);
+        g.fillStyle(0xffaa00, 1);
+        g.fillCircle(20, 20, 12);
+        g.fillStyle(0xffff00, 1);
+        g.fillCircle(20, 15, 6);
+        g.generateTexture('campfireLit', 40, 40);
+        g.destroy();
+      }
+    }
+    
+    create() {
+      this.gameState = 'PLAYING'; // PLAYING, WON
+      this.inventory = { wood: 0, berries: 0 };
+      this.requiredWood = 3;
+      this.requiredBerries = 2;
+
+      this.createEnvironment();
+      this.createPlayer();
+      this.createCollectibles();
+      this.createCampfire();
+      this.createUI();
+
+      this.keys = this.input.keyboard.addKeys('W,A,S,D');
+
+      this.physics.add.overlap(this.player, this.collectibles, this.collectItem, null, this);
+      this.physics.add.overlap(this.player, this.campfire, this.tryLightFire, null, this);
+    }
+
+    update() {
+      if (this.gameState === 'PLAYING') {
+        this.updatePlayer();
+      }
+    }
+
+    createEnvironment() {
+      // Ground
+      this.add.rectangle(450, 300, 900, 600, 0x1a4d1a);
+
+      // Trees (background decoration)
+      for (let i = 0; i < 25; i++) {
+        const x = Phaser.Math.Between(50, 850);
+        const y = Phaser.Math.Between(50, 550);
+        this.add.circle(x, y, Phaser.Math.Between(6, 12), 0x0d3d0d);
+      }
+
+      // Tent
+      const tentG = this.add.graphics();
+      tentG.fillStyle(0xaa5533, 1);
+      tentG.fillTriangle(700, 500, 750, 420, 800, 500);
+      tentG.fillStyle(0x663333, 1);
+      tentG.fillTriangle(725, 460, 750, 420, 775, 460);
+
+      // Instructions
+      this.add.text(450, 20, 'Collect 3 Wood + 2 Berries to Light the Fire!', {
+        fontFamily: 'monospace',
+        fontSize: 16,
+        color: '#ffff00',
+        align: 'center'
+      }).setOrigin(0.5);
+    }
+
+    createPlayer() {
+      this.player = this.physics.add.sprite(100, 100, 'player');
+      this.player.setCollideWorldBounds(true);
+      this.player.setBounce(0.2);
+      this.player.speed = 200;
+    }
+
+    createCollectibles() {
+      this.collectibles = this.physics.add.group();
+
+      // Spawn 5 wood items
+      for (let i = 0; i < 5; i++) {
+        let x, y;
+        let overlapping = true;
+        
+        // Ensure items don't spawn on top of each other
+        while (overlapping) {
+          x = Phaser.Math.Between(100, 800);
+          y = Phaser.Math.Between(100, 500);
+          overlapping = false;
+          
+          this.collectibles.children.entries.forEach(item => {
+            const dist = Phaser.Math.Distance.Between(x, y, item.x, item.y);
+            if (dist < 80) overlapping = true;
+          });
+        }
+
+        const wood = this.collectibles.create(x, y, 'wood');
+        wood.itemType = 'wood';
+        wood.setTint(0x8b4513);
+      }
+
+      // Spawn 4 berries
+      for (let i = 0; i < 4; i++) {
+        let x, y;
+        let overlapping = true;
+        
+        while (overlapping) {
+          x = Phaser.Math.Between(100, 800);
+          y = Phaser.Math.Between(100, 500);
+          overlapping = false;
+          
+          this.collectibles.children.entries.forEach(item => {
+            const dist = Phaser.Math.Distance.Between(x, y, item.x, item.y);
+            if (dist < 80) overlapping = true;
+          });
+        }
+
+        const berry = this.collectibles.create(x, y, 'berries');
+        berry.itemType = 'berries';
+        berry.setTint(0xff3366);
+      }
+    }
+
+    createCampfire() {
+      this.campfire = this.physics.add.sprite(450, 300, 'campfire');
+      this.campfire.lit = false;
+      this.campfire.setImmovable(true);
+      this.campfireLabel = this.add.text(450, 350, 'Campfire', {
+        fontFamily: 'monospace',
+        fontSize: 14,
+        color: '#888888',
+        align: 'center'
+      }).setOrigin(0.5);
+    }
+
+    updatePlayer() {
+      this.player.setVelocity(0);
+
+      if (this.keys.W.isDown) {
+        this.player.setVelocityY(-this.player.speed);
+      }
+      if (this.keys.S.isDown) {
+        this.player.setVelocityY(this.player.speed);
+      }
+      if (this.keys.A.isDown) {
+        this.player.setVelocityX(-this.player.speed);
+      }
+      if (this.keys.D.isDown) {
+        this.player.setVelocityX(this.player.speed);
+      }
+    }
+
+    collectItem(player, item) {
+      const itemType = item.itemType;
+      this.inventory[itemType]++;
+
+      // Visual feedback
+      this.tweens.add({
+        targets: item,
+        alpha: 0,
+        scale: 1.5,
+        duration: 200,
+        onComplete: () => item.destroy()
+      });
+
+      // Floating text
+      const floatingText = this.add.text(item.x, item.y - 20, '+1 ' + itemType, {
+        fontFamily: 'monospace',
+        fontSize: 16,
+        color: itemType === 'wood' ? '#8b4513' : '#ff3366',
+        fontStyle: 'bold'
+      });
+
+      this.tweens.add({
+        targets: floatingText,
+        y: floatingText.y - 40,
+        alpha: 0,
+        duration: 500,
+        onComplete: () => floatingText.destroy()
+      });
+
+      this.updateUI();
+    }
+
+    tryLightFire(player, fire) {
+      if (this.gameState !== 'PLAYING') return;
+
+      const hasEnough = this.inventory.wood >= this.requiredWood && 
+                        this.inventory.berries >= this.requiredBerries;
+
+      if (!fire.lit && hasEnough) {
+        fire.lit = true;
+        fire.setTexture('campfireLit');
+        this.campfireLabel.setText('🔥 Fire Lit! 🔥');
+        this.campfireLabel.setColor('#ffaa00');
+
+        // Fire animation
+        this.tweens.add({
+          targets: fire,
+          scale: 1.2,
+          duration: 200,
+          yoyo: true,
+          repeat: 2
+        });
+
+        // Particles
+        for (let i = 0; i < 8; i++) {
+          const particle = this.add.circle(
+            fire.x + Phaser.Math.Between(-10, 10),
+            fire.y - 20,
+            3,
+            0xffaa00
+          );
+
+          this.tweens.add({
+            targets: particle,
+            y: particle.y - 50,
+            alpha: 0,
+            duration: 800,
+            onComplete: () => particle.destroy()
+          });
+        }
+
+        this.gameState = 'WON';
+        this.showVictory();
+      }
+    }
+
+    showVictory() {
+      this.add.rectangle(450, 300, 900, 600, 0x000000, 0.8);
+
+      this.add.text(450, 200, 'You Survived!', {
+        fontFamily: 'monospace',
+        fontSize: 48,
+        color: '#ffff00',
+        fontStyle: 'bold',
+        align: 'center'
+      }).setOrigin(0.5);
+
+      this.add.text(450, 280, '🔥 🏕️ 🔥', {
+        fontSize: 48,
+        align: 'center'
+      }).setOrigin(0.5);
+
+      this.add.text(450, 360, `Items Used: ${this.requiredWood} Wood + ${this.requiredBerries} Berries`, {
+        fontFamily: 'monospace',
+        fontSize: 20,
+        color: '#cccccc',
+        align: 'center'
+      }).setOrigin(0.5);
+
+      this.add.text(450, 420, 'Remaining: ' + 
+                            (this.inventory.wood - this.requiredWood) + ' Wood, ' + 
+                            (this.inventory.berries - this.requiredBerries) + ' Berries', {
+        fontFamily: 'monospace',
+        fontSize: 16,
+        color: '#aaaaaa',
+        align: 'center'
+      }).setOrigin(0.5);
+
+      this.add.text(450, 500, 'Click to Play Again', {
+        fontFamily: 'monospace',
+        fontSize: 18,
+        color: '#888888',
+        align: 'center'
+      }).setOrigin(0.5).setInteractive();
+
+      this.input.once('pointerdown', () => this.scene.restart());
+    }
+
+    createUI() {
+      this.woodText = this.add.text(16, 50, 'Wood: 0/' + this.requiredWood, {
+        fontFamily: 'monospace',
+        fontSize: 18,
+        color: '#8b4513',
+        fontStyle: 'bold',
+        backgroundColor: '#000',
+        padding: { x: 8, y: 4 }
+      });
+
+      this.berriesText = this.add.text(16, 85, 'Berries: 0/' + this.requiredBerries, {
+        fontFamily: 'monospace',
+        fontSize: 18,
+        color: '#ff3366',
+        fontStyle: 'bold',
+        backgroundColor: '#000',
+        padding: { x: 8, y: 4 }
+      });
+
+      this.statusText = this.add.text(450, 570, 'Collect items to light the campfire', {
+        fontFamily: 'monospace',
+        fontSize: 14,
+        color: '#cccccc',
+        align: 'center'
+      }).setOrigin(0.5);
+    }
+
+    updateUI() {
+      this.woodText.setText('Wood: ' + this.inventory.wood + '/' + this.requiredWood);
+      this.berriesText.setText('Berries: ' + this.inventory.berries + '/' + this.requiredBerries);
+
+      const woodProgress = Math.min(this.inventory.wood, this.requiredWood);
+      const berryProgress = Math.min(this.inventory.berries, this.requiredBerries);
+      const totalProgress = woodProgress + berryProgress;
+
+      if (totalProgress === this.requiredWood + this.requiredBerries) {
+        this.statusText.setText('Ready to light the fire! Go to the campfire!');
+        this.statusText.setColor('#ffff00');
+      } else {
+        this.statusText.setText(`Need ${this.requiredWood - woodProgress} more wood and ${this.requiredBerries - berryProgress} more berries`);
+      }
+    }
+  }
+  </script>
+  <!-- REGION:SCENE_CLASS_END -->
+
+  <!-- REGION:CONFIG_START -->
+  <script>
+  const config = {
+    type: Phaser.AUTO,
+    width: 900,
+    height: 600,
+    backgroundColor: 0x003300,
+    physics: {
+      default: 'arcade',
+      arcade: {
+        gravity: { y: 0 },
+        debug: false
+      }
+    },
+    scene: [CampingScene]
+  };
+  </script>
+  <!-- REGION:CONFIG_END -->
+
+  <!-- REGION:GAME_INIT_START -->
+  <script>
+  window.onload = () => {
+    const game = new Phaser.Game(config);
+  };
+  </script>
+  <!-- REGION:GAME_INIT_END -->
+
+</body>
+</html>
+
+"""
+
+TemplateType_TopDownArena makeup/dressup_game="""
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Dress-Up Game - Phaser Template</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html,body { margin:0; padding:0; background:#fce4ec; height:100%; }
+    .hint { position:absolute; right:12px; top:12px; color:#333; font-family:monospace; font-size:13px; background:rgba(255,255,255,0.8); padding:8px; border-radius:6px; z-index: 1000;}
+  </style>
+</head>
+<body>
+  <div class="hint">Click options to customize outfit 💄✨</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+
+  <!-- REGION:SCENE_CLASS_START -->
+  <script>
+  class DressUpScene extends Phaser.Scene {
+    constructor() { super('DressUpScene'); }
+    
+    preload() {
+      this.generateTextures();
+    }
+    
+    generateTextures() {
+      // Button textures
+      if (!this.textures.exists('button')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xffffff, 1);
+        g.fillRoundedRect(0, 0, 140, 35, 4);
+        g.lineStyle(2, 0xc2185b);
+        g.strokeRoundedRect(0, 0, 140, 35, 4);
+        g.generateTexture('button', 140, 35);
+        g.destroy();
+      }
+
+      if (!this.textures.exists('buttonActive')) {
+        const g = this.add.graphics();
+        g.fillStyle(0xffc0cb, 1);
+        g.fillRoundedRect(0, 0, 140, 35, 4);
+        g.lineStyle(3, 0xc2185b);
+        g.strokeRoundedRect(0, 0, 140, 35, 4);
+        g.generateTexture('buttonActive', 140, 35);
+        g.destroy();
+      }
+    }
+    
+    create() {
+      // Game state
+      this.outfit = {
+        skinColor: 0xffdbac,
+        hairColor: 0x8b4513,
+        hairStyle: 'short',
+        dressColor: 0xff69b4,
+        dressStyle: 'formal',
+        accessoryColor: 0xffdd00,
+        accessoryType: 'earring'
+      };
+
+      this.createCharacter();
+      this.createUI();
+      this.updateCharacterDisplay();
+    }
+
+    update() {}
+
+    createCharacter() {
+      this.characterGroup = this.add.container(400, 280);
+
+      // Skin/body
+      this.body = this.add.circle(0, 50, 45, this.outfit.skinColor);
+      this.characterGroup.add(this.body);
+
+      // Head
+      this.head = this.add.circle(0, -20, 35, this.outfit.skinColor);
+      this.characterGroup.add(this.head);
+
+      // Hair
+      this.hair = this.add.graphics();
+      this.characterGroup.add(this.hair);
+
+      // Eyes
+      this.eyes = this.add.text(0, -25, '👀', { fontSize: 24 }).setOrigin(0.5);
+      this.characterGroup.add(this.eyes);
+
+      // Dress
+      this.dress = this.add.graphics();
+      this.characterGroup.add(this.dress);
+
+      // Accessories
+      this.accessoryGroup = this.add.container(0, -50);
+      this.characterGroup.add(this.accessoryGroup);
+    }
+
+    updateCharacterDisplay() {
+      // Update hair
+      this.hair.clear();
+      this.hair.fillStyle(this.outfit.hairColor, 1);
+      if (this.outfit.hairStyle === 'short') {
+        this.hair.fillCircle(-15, -50, 18);
+        this.hair.fillCircle(15, -50, 18);
+      } else if (this.outfit.hairStyle === 'long') {
+        this.hair.fillEllipse(0, -40, 50, 60);
+      } else if (this.outfit.hairStyle === 'curly') {
+        this.hair.fillCircle(-10, -55, 12);
+        this.hair.fillCircle(10, -55, 12);
+        this.hair.fillCircle(0, -50, 15);
+      }
+
+      // Update dress
+      this.dress.clear();
+      this.dress.fillStyle(this.outfit.dressColor, 1);
+      if (this.outfit.dressStyle === 'casual') {
+        this.dress.fillRect(-30, 30, 60, 80);
+      } else if (this.outfit.dressStyle === 'formal') {
+        this.dress.fillRect(-35, 30, 70, 100);
+        this.dress.fillTriangle(-35, 30, -50, 90, -35, 90);
+        this.dress.fillTriangle(35, 30, 50, 90, 35, 90);
+      } else if (this.outfit.dressStyle === 'sporty') {
+        this.dress.fillRoundedRect(-28, 30, 56, 70, 4);
+      }
+
+      // Update accessory
+      this.accessoryGroup.removeAll(true);
+      this.drawAccessory();
+    }
+
+    drawAccessory() {
+      if (this.outfit.accessoryType === 'earring') {
+        const earring1 = this.add.circle(-25, 5, 8, this.outfit.accessoryColor);
+        const earring2 = this.add.circle(25, 5, 8, this.outfit.accessoryColor);
+        this.accessoryGroup.add([earring1, earring2]);
+      } else if (this.outfit.accessoryType === 'necklace') {
+        const necklace = this.add.graphics();
+        necklace.lineStyle(3, this.outfit.accessoryColor);
+        necklace.arc(0, 40, 30, Math.PI, 0, false);
+        this.accessoryGroup.add(necklace);
+      } else if (this.outfit.accessoryType === 'crown') {
+        const crown = this.add.graphics();
+        crown.fillStyle(this.outfit.accessoryColor, 1);
+        crown.fillTriangle(-15, -5, -5, -20, 0, 0);
+        crown.fillTriangle(0, -15, 10, -25, 15, -10);
+        crown.fillCircle(-15, 0, 4);
+        crown.fillCircle(15, 0, 4);
+        this.accessoryGroup.add(crown);
+      }
+    }
+
+    createUI() {
+      // Title
+      this.add.text(400, 20, '✨ Dress-Up Creator ✨', {
+        fontFamily: 'monospace',
+        fontSize: 28,
+        color: '#c2185b',
+        fontStyle: 'bold',
+        align: 'center'
+      }).setOrigin(0.5);
+
+      let yPos = 120;
+
+      // Hair options
+      this.add.text(50, yPos, 'Hair:', {
+        fontFamily: 'monospace',
+        fontSize: 16,
+        color: '#333',
+        fontStyle: 'bold'
+      });
+
+      this.hairButtons = [];
+      const hairStyles = ['short', 'long', 'curly'];
+      hairStyles.forEach((style, i) => {
+        const btn = this.add.text(50 + i * 150, yPos + 30, '→ ' + style.toUpperCase(), {
+          fontFamily: 'monospace',
+          fontSize: 14,
+          color: '#333',
+          backgroundColor: '#fff',
+          padding: { x: 8, y: 4 }
+        }).setInteractive();
+
+        btn.on('pointerdown', () => {
+          this.outfit.hairStyle = style;
+          this.updateCharacterDisplay();
+          this.updateButtonStates();
+        });
+
+        btn.on('pointerover', () => btn.setBackgroundColor('#ffc0cb'));
+        btn.on('pointerout', () => {
+          const color = this.outfit.hairStyle === style ? '#ffb6db' : '#fff';
+          btn.setBackgroundColor(color);
+        });
+
+        this.hairButtons.push(btn);
+      });
+
+      yPos += 70;
+
+      // Hair color
+      this.add.text(50, yPos, 'Hair Color:', {
+        fontFamily: 'monospace',
+        fontSize: 16,
+        color: '#333',
+        fontStyle: 'bold'
+      });
+
+      this.hairColorButtons = [];
+      const hairColors = [0x8b4513, 0x000000, 0xff6b9d, 0xffdd00, 0x4caf50];
+      hairColors.forEach((color, i) => {
+        const btn = this.add.circle(50 + i * 50, yPos + 30, 15, color);
+        btn.setInteractive().on('pointerdown', () => {
+          this.outfit.hairColor = color;
+          this.updateCharacterDisplay();
+          this.updateColorButtons();
+        });
+        this.hairColorButtons.push(btn);
+      });
+
+      yPos += 60;
+
+      // Dress style
+      this.add.text(50, yPos, 'Dress:', {
+        fontFamily: 'monospace',
+        fontSize: 16,
+        color: '#333',
+        fontStyle: 'bold'
+      });
+
+      this.dressButtons = [];
+      const dressStyles = ['casual', 'formal', 'sporty'];
+      dressStyles.forEach((style, i) => {
+        const btn = this.add.text(50 + i * 150, yPos + 30, '→ ' + style.toUpperCase(), {
+          fontFamily: 'monospace',
+          fontSize: 14,
+          color: '#333',
+          backgroundColor: '#fff',
+          padding: { x: 8, y: 4 }
+        }).setInteractive();
+
+        btn.on('pointerdown', () => {
+          this.outfit.dressStyle = style;
+          this.updateCharacterDisplay();
+          this.updateButtonStates();
+        });
+
+        btn.on('pointerover', () => btn.setBackgroundColor('#ffc0cb'));
+        btn.on('pointerout', () => {
+          const color = this.outfit.dressStyle === style ? '#ffb6db' : '#fff';
+          btn.setBackgroundColor(color);
+        });
+
+        this.dressButtons.push(btn);
+      });
+
+      yPos += 70;
+
+      // Dress color
+      this.add.text(50, yPos, 'Dress Color:', {
+        fontFamily: 'monospace',
+        fontSize: 16,
+        color: '#333',
+        fontStyle: 'bold'
+      });
+
+      this.dressColorButtons = [];
+      const dressColors = [0xff69b4, 0x9c27b0, 0x2196f3, 0xff9800, 0x4caf50];
+      dressColors.forEach((color, i) => {
+        const btn = this.add.circle(50 + i * 50, yPos + 30, 15, color);
+        btn.setInteractive().on('pointerdown', () => {
+          this.outfit.dressColor = color;
+          this.updateCharacterDisplay();
+          this.updateColorButtons();
+        });
+        this.dressColorButtons.push(btn);
+      });
+
+      yPos += 60;
+
+      // Accessory
+      this.add.text(50, yPos, 'Accessory:', {
+        fontFamily: 'monospace',
+        fontSize: 16,
+        color: '#333',
+        fontStyle: 'bold'
+      });
+
+      this.accessoryButtons = [];
+      const accessories = ['earring', 'necklace', 'crown'];
+      accessories.forEach((acc, i) => {
+        const btn = this.add.text(50 + i * 150, yPos + 30, '→ ' + acc.toUpperCase(), {
+          fontFamily: 'monospace',
+          fontSize: 14,
+          color: '#333',
+          backgroundColor: '#fff',
+          padding: { x: 8, y: 4 }
+        }).setInteractive();
+
+        btn.on('pointerdown', () => {
+          this.outfit.accessoryType = acc;
+          this.updateCharacterDisplay();
+          this.updateButtonStates();
+        });
+
+        btn.on('pointerover', () => btn.setBackgroundColor('#ffc0cb'));
+        btn.on('pointerout', () => {
+          const color = this.outfit.accessoryType === acc ? '#ffb6db' : '#fff';
+          btn.setBackgroundColor(color);
+        });
+
+        this.accessoryButtons.push(btn);
+      });
+
+      yPos += 70;
+
+      // Accessory color
+      this.add.text(50, yPos, 'Accessory Color:', {
+        fontFamily: 'monospace',
+        fontSize: 16,
+        color: '#333',
+        fontStyle: 'bold'
+      });
+
+      this.accessoryColorButtons = [];
+      const accColors = [0xffdd00, 0xff69b4, 0x00bcd4, 0x4caf50, 0xff6f00];
+      accColors.forEach((color, i) => {
+        const btn = this.add.circle(50 + i * 50, yPos + 30, 15, color);
+        btn.setInteractive().on('pointerdown', () => {
+          this.outfit.accessoryColor = color;
+          this.updateCharacterDisplay();
+          this.updateColorButtons();
+        });
+        this.accessoryColorButtons.push(btn);
+      });
+
+      this.updateButtonStates();
+    }
+
+    updateButtonStates() {
+      // Hair style buttons
+      this.hairButtons.forEach((btn, i) => {
+        const isActive = ['short', 'long', 'curly'][i] === this.outfit.hairStyle;
+        btn.setBackgroundColor(isActive ? '#ffb6db' : '#fff');
+      });
+
+      // Dress style buttons
+      this.dressButtons.forEach((btn, i) => {
+        const isActive = ['casual', 'formal', 'sporty'][i] === this.outfit.dressStyle;
+        btn.setBackgroundColor(isActive ? '#ffb6db' : '#fff');
+      });
+
+      // Accessory buttons
+      this.accessoryButtons.forEach((btn, i) => {
+        const isActive = ['earring', 'necklace', 'crown'][i] === this.outfit.accessoryType;
+        btn.setBackgroundColor(isActive ? '#ffb6db' : '#fff');
+      });
+    }
+
+    updateColorButtons() {
+      // Update all color button states for visual feedback
+    }
+  }
+  </script>
+  <!-- REGION:SCENE_CLASS_END -->
+
+  <!-- REGION:CONFIG_START -->
+  <script>
+  const config = {
+    type: Phaser.AUTO,
+    width: 800,
+    height: 600,
+    backgroundColor: 0xfce4ec,
+    scene: [DressUpScene]
+  };
+  </script>
+  <!-- REGION:CONFIG_END -->
+
+  <!-- REGION:GAME_INIT_START -->
+  <script>
+  window.onload = () => {
+    const game = new Phaser.Game(config);
+  };
+  </script>
+  <!-- REGION:GAME_INIT_END -->
+
+</body>
+</html>
+
+"""
