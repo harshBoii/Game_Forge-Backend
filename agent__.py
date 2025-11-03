@@ -235,7 +235,7 @@ def suggest_visual_feature_changes(state: GameAgentState) -> GameAgentState:
 
 
     prompt = f"""
-You are customizing a mini-game that will be build using phaser , html and js by a LLM model.
+You are customizing a mini-game that will be build using only html , css and js by a LLM model.
 
 
 User Idea:
@@ -279,7 +279,7 @@ def apply_changes_to_template(state: GameAgentState) -> GameAgentState:
     print(f"Changes are {changes}")
     base_code = state.get("base_template_code", "")
     prompt = f"""
-You are a js developer also using phaser and html.
+You are a js developer also using only html and js and css.
 
 
 TASK:
@@ -338,9 +338,9 @@ def review_code(state: GameAgentState) -> GameAgentState:
     
     # Construct enhanced review prompt
     prompt = f"""
-You are reviewing this HTML Phaser 3 game.
+You are reviewing this HTML  game.
 ========================IMPORTANT========================
-make sure this game is playable and correct phaser API are used
+make sure this game is playable 
 Do not worry about best practices and functions overrides , if anything does not cause runTime error then pass it
 
 ──────────────────────────────
@@ -459,7 +459,7 @@ def fix_game_code(state: GameAgentState) -> GameAgentState:
 
 
     prompt = f"""
-You are a game developer fixing code based on QA feedback.
+You are a game developer fixing code based on feedback.
 
 
 ISSUES IDENTIFIED:
@@ -610,7 +610,7 @@ def apply_feedback_to_code(state: GameAgentState) -> GameAgentState:
     log_timestamp(f"🛠️  Applying user feedback: {feedback[:120]}...")
     
     prompt = f"""
-You are an expert game developer modifying an existing Phaser/HTML game.
+You are an expert game developer modifying an existing HTML game.
 
 
 USER FEEDBACK:
