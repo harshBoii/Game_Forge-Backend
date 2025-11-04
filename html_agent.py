@@ -364,9 +364,8 @@ CURRENT TEMPLATE CODE:
 
 YOUR TASK:
 1. Understand what the user wants based on their answers
-2. Find the relevant sections in the code that need to be modified
-3. Suggest EXACT code changes (find and replace)
-4. Each suggestion should map directly to a user answer
+2. Use the template code as an example
+3. Each suggestion should map directly to a user answer
 
 Return ONLY valid JSON. Do NOT include markdown or extra text:
 
@@ -374,9 +373,7 @@ Return ONLY valid JSON. Do NOT include markdown or extra text:
   "Changes": [
     {{
       "answer": "User said X",
-      "what": "Modify Y to match X",
-      "where": "Function name or code section where change is needed",
-      "how": "Specific instructions on what to change",
+      "how": "Specific instructions on how to change or add this feature or visual",
     }}
   ]
 }}
@@ -439,7 +436,6 @@ Current code:
 {base_code}
 
 TASK:
-- Modify ONLY the game object values
 - Return COMPLETE valid HTML
 - Start with <!DOCTYPE html>
 - No markdown formatting
