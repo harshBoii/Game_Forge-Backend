@@ -2,426 +2,804 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Camping Adventure - Phaser Game</title>
+  <title>Endless Racing - Dodge & Destroy</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    html,body { margin:0; padding:0; background:#021; height:100%; }
-    .hint { position:absolute; right:12px; top:12px; color:#ddd; font-family:monospace; font-size:13px; background:rgba(0,0,0,0.25); padding:8px; border-radius:6px; z-index: 1000;}
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);
+      height: 100%;
+      font-family: 'Courier New', monospace;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: manipulation;
+    }
+
+    .game-container {
+      position: relative;
+      background: radial-gradient(ellipse at center, #1a1a2e 0%, #0a0a0a 100%);
+      border-radius: 12px;
+      box-shadow:
+        0 0 60px rgba(100, 200, 255, 0.3),
+        inset 0 0 40px rgba(0, 0, 0, 0.5);
+      overflow: hidden;
+    }
+
+    canvas {
+      display: block;
+      background: linear-gradient(180deg, #0f1419 0%, #050709 100%);
+    }
+
+    .ui-overlay {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      color: #64c8ff;
+      font-size: 16px;
+      font-weight: bold;
+      text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      pointer-events: none;
+    }
+
+    .ui-row {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .ui-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(0, 0, 0, 0.35);
+      padding: 8px 12px;
+      border-radius: 6px;
+      border-left: 3px solid #64c8ff;
+    }
+
+    .ui-item span.value {
+      font-weight: bold;
+      color: #ffff66;
+      min-width: 48px;
+      display: inline-block;
+      text-align: right;
+    }
+
+    .ui-item .bar {
+      position: relative;
+      width: 120px;
+      height: 8px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .ui-item .bar .fill {
+      position: absolute;
+      top: 0; left: 0; bottom: 0;
+      width: 0%;
+      background: linear-gradient(90deg, #64c8ff, #00ffa8);
+      box-shadow: 0 0 10px rgba(0,255,168,0.6);
+    }
+
+    .controls {
+      position: absolute;
+      bottom: 12px;
+      left: 12px;
+      right: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      color: #9ad7ff;
+      font-size: 12px;
+      opacity: 0.9;
+      pointer-events: none;
+    }
+
+    .controls .kbd {
+      background: rgba(0,0,0,0.35);
+      border: 1px solid rgba(100,200,255,0.35);
+      padding: 3px 6px;
+      border-radius: 4px;
+      margin: 0 2px;
+      color: #ccecff;
+    }
+
+    .banner {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(0,0,0,0.6);
+      padding: 16px 20px;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.12);
+      color: #e8f6ff;
+      text-align: center;
+      z-index: 20;
+      display: none;
+    }
+
+    .banner h1 {
+      margin: 0 0 8px 0;
+      font-size: 24px;
+      color: #ffed75;
+      text-shadow: 0 2px 10px rgba(0,0,0,0.6);
+    }
+
+    .banner p {
+      margin: 4px 0;
+      opacity: 0.9;
+    }
+
+    .tap-hint {
+      position: absolute;
+      right: 12px;
+      bottom: 12px;
+      background: rgba(0,0,0,0.35);
+      border: 1px solid rgba(100,200,255,0.35);
+      border-radius: 8px;
+      color: #ccecff;
+      padding: 8px 10px;
+      font-size: 12px;
+      z-index: 10;
+      display: none;
+    }
+
   </style>
 </head>
 <body>
-  <div class="hint">WASD to move • Collect stones (4) & wood (3) • Build fire pit & pitch tent</div>
+  <div class="game-container" id="container">
+    <canvas id="game"></canvas>
 
-  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+    <div class="ui-overlay" id="ui">
+      <div class="ui-row">
+        <div class="ui-item">Score: <span class="value" id="score">0</span></div>
+        <div class="ui-item">Speed: <span class="value" id="speed">0</span> km/h</div>
+        <div class="ui-item">Destroyed: <span class="value" id="kills">0</span></div>
+      </div>
+      <div class="ui-row">
+        <div class="ui-item">
+          Bullets: <span class="value" id="bullets">∞</span>
+          <div class="bar" title="Gun Cooldown">
+            <div class="fill" id="gunBar"></div>
+          </div>
+        </div>
+        <div class="ui-item">
+          Missiles: <span class="value" id="missiles">3</span>
+          <div class="bar" title="Missile Cooldown">
+            <div class="fill" id="missileBar"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="controls" id="controls">
+      <div>
+        Move <span class="kbd">W</span><span class="kbd">A</span><span class="kbd">S</span><span class="kbd">D</span> or <span class="kbd">Arrows</span>
+      </div>
+      <div>
+        Shoot <span class="kbd">Space</span> • Missile <span class="kbd">M</span> • Restart <span class="kbd">R</span>
+      </div>
+    </div>
+
+    <div class="banner" id="banner">
+      <h1 id="bannerTitle">Game Over</h1>
+      <p id="bannerSubtitle">Press R to restart</p>
+    </div>
+
+    <div class="tap-hint" id="tapHint">
+      Tap left/right to steer. Tap top to shoot, bottom-right for missile.
+    </div>
+  </div>
 
   <script>
-  class CampingScene extends Phaser.Scene {
-    constructor() { super('CampingScene'); }
-    
-    preload() {
-      this.generatePixelArtTextures();
-    }
-    
-    generatePixelArtTextures() {
-        const createTexture = (name, width, height, drawCallback) => {
-            if (this.textures.exists(name)) return;
-            const g = this.add.graphics();
-            drawCallback(g);
-            g.generateTexture(name, width, height);
-            g.destroy();
+    (() => {
+      const container = document.getElementById('container');
+      const canvas = document.getElementById('game');
+      const ctx = canvas.getContext('2d');
+
+      const uiScore = document.getElementById('score');
+      const uiSpeed = document.getElementById('speed');
+      const uiKills = document.getElementById('kills');
+      const uiMissiles = document.getElementById('missiles');
+      const uiGunBar = document.getElementById('gunBar');
+      const uiMissileBar = document.getElementById('missileBar');
+      const banner = document.getElementById('banner');
+      const bannerTitle = document.getElementById('bannerTitle');
+      const tapHint = document.getElementById('tapHint');
+
+      // Sizing
+      function fit() {
+        const maxW = Math.min(window.innerWidth - 20, 560);
+        const maxH = Math.min(window.innerHeight - 20, 960);
+        const aspect = 9/16; // portrait
+        let w = maxW;
+        let h = Math.round(w / aspect);
+        if (h > maxH) {
+          h = maxH;
+          w = Math.round(h * aspect);
+        }
+        container.style.width = w + 'px';
+        container.style.height = h + 'px';
+        canvas.width = w * devicePixelRatio;
+        canvas.height = h * devicePixelRatio;
+        canvas.style.width = w + 'px';
+        canvas.style.height = h + 'px';
+        ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+
+        ROAD.w = Math.floor(w * 0.72);
+        ROAD.x = Math.floor((w - ROAD.w) / 2);
+        ROAD.laneCount = 4;
+        ROAD.laneW = Math.floor(ROAD.w / ROAD.laneCount);
+        WORLD.w = w;
+        WORLD.h = h;
+      }
+
+      // World/road
+      const WORLD = { w: 360, h: 640 };
+      const ROAD = { x: 40, w: 280, laneW: 70, laneCount: 4, scroll: 0 };
+
+      // Input
+      const keys = {};
+      let lastShotAt = 0;
+      let lastMissileAt = -9999;
+      const GUN_COOLDOWN = 140; // ms
+      const MISSILE_COOLDOWN = 1250; // ms
+
+      // Player
+      const player = {
+        x: 0, y: 0, w: 42, h: 70,
+        speed: 90, // km/h for UI; scroll speed derived
+        vx: 0, vy: 0,
+        color: '#5cffb9',
+        alive: true,
+      };
+
+      // Game state
+      let score = 0;
+      let kills = 0;
+      let missiles = 3;
+      let time = 0;
+      let gameOver = false;
+
+      // Entities
+      const cars = [];
+      const bullets = [];
+      const missilesArr = [];
+      const explosions = [];
+      const particles = [];
+
+      // Spawning
+      let spawnTimer = 0;
+      let spawnInterval = 700;
+
+      // Helpers
+      function rand(a, b) { return Math.random() * (b - a) + a; }
+      function choice(arr) { return arr[(Math.random() * arr.length) | 0]; }
+      function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+      function reset() {
+        player.x = ROAD.x + ROAD.w / 2 - player.w / 2;
+        player.y = WORLD.h - player.h - 24;
+        player.vx = player.vy = 0;
+        player.speed = 110;
+        player.alive = true;
+
+        bullets.length = 0;
+        missilesArr.length = 0;
+        cars.length = 0;
+        explosions.length = 0;
+        particles.length = 0;
+
+        score = 0;
+        kills = 0;
+        missiles = 3;
+        spawnTimer = 0;
+        lastShotAt = 0;
+        lastMissileAt = -9999;
+        time = performance.now();
+        gameOver = false;
+        banner.style.display = 'none';
+      }
+
+      function laneCenter(i) {
+        return ROAD.x + i * ROAD.laneW + ROAD.laneW / 2;
+      }
+
+      function spawnCar() {
+        const lane = (Math.random() * ROAD.laneCount) | 0;
+        const w = 44 + ((Math.random() * 2) | 0) * 10;
+        const h = 78;
+        const color = choice(['#ff5964', '#f5a623', '#14d3ff', '#9b59b6', '#00e676', '#e74c3c']);
+        const speed = rand(0.8, 1.25); // relative
+        // prevent overlapping spawn by checking last car in same lane
+        const x = laneCenter(lane) - w / 2;
+        const yStart = -h - 20;
+        cars.push({ x, y: yStart, w, h, lane, color, speed, alive: true, hp: 1 });
+      }
+
+      function rectsOverlap(a, b) {
+        return !(a.x + a.w < b.x || a.x > b.x + b.w || a.y + a.h < b.y || a.y > b.y + b.h);
+      }
+
+      function circleRectOverlap(cx, cy, r, rect) {
+        const nx = clamp(cx, rect.x, rect.x + rect.w);
+        const ny = clamp(cy, rect.y, rect.y + rect.h);
+        const dx = cx - nx;
+        const dy = cy - ny;
+        return dx * dx + dy * dy <= r * r;
+      }
+
+      function addExplosion(x, y, radius = 90) {
+        explosions.push({ x, y, r: 8, maxR: radius, t: 0, ttl: 420, didDamage: false });
+        // particles
+        for (let i = 0; i < 22; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const sp = rand(1, 4);
+          particles.push({
+            x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+            life: rand(300, 700), t: 0,
+            color: i % 2 ? '#ffdd55' : '#ff7766', size: rand(2, 4)
+          });
+        }
+      }
+
+      // DRAW
+      function drawRoad(dt) {
+        // asphalt already via canvas bg
+        // side borders
+        ctx.fillStyle = '#1b2a35';
+        ctx.fillRect(ROAD.x - 8, 0, 8, WORLD.h);
+        ctx.fillRect(ROAD.x + ROAD.w, 0, 8, WORLD.h);
+
+        // lane markers
+        const dashH = 28;
+        const gap = 22;
+        ROAD.scroll += scrollSpeed() * dt * 0.08;
+        const offsetY = -(ROAD.scroll % (dashH + gap));
+        ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+        ctx.lineWidth = 3;
+        ctx.setLineDash([dashH, gap]);
+        ctx.lineDashOffset = offsetY;
+        for (let i = 1; i < ROAD.laneCount; i++) {
+          const x = ROAD.x + i * ROAD.laneW;
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, WORLD.h);
+          ctx.stroke();
+        }
+        ctx.setLineDash([]);
+      }
+
+      function drawCar(c) {
+        const r = 6;
+        ctx.fillStyle = c.color;
+        roundRect(ctx, c.x, c.y, c.w, c.h, r);
+        ctx.fill();
+        // windshield
+        ctx.fillStyle = 'rgba(255,255,255,0.1)';
+        roundRect(ctx, c.x + 6, c.y + 10, c.w - 12, 16, 4);
+        ctx.fill();
+        // tail lights
+        ctx.fillStyle = 'rgba(255, 70, 60, 0.8)';
+        ctx.fillRect(c.x + 6, c.y + c.h - 6, 8, 3);
+        ctx.fillRect(c.x + c.w - 14, c.y + c.h - 6, 8, 3);
+      }
+
+      function drawPlayer() {
+        const p = player;
+        const r = 8;
+        ctx.fillStyle = p.color;
+        roundRect(ctx, p.x, p.y, p.w, p.h, r);
+        ctx.fill();
+        // cockpit
+        ctx.fillStyle = 'rgba(255,255,255,0.12)';
+        roundRect(ctx, p.x + 6, p.y + 12, p.w - 12, 22, 6);
+        ctx.fill();
+        // neon glow
+        ctx.shadowColor = '#00ffcc';
+        ctx.shadowBlur = 18;
+        ctx.strokeStyle = 'rgba(0,255,204,0.35)';
+        ctx.lineWidth = 2;
+        roundRect(ctx, p.x + 2, p.y + 2, p.w - 4, p.h - 4, 6);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+      }
+
+      function drawBullet(b) {
+        ctx.fillStyle = '#9ad7ff';
+        ctx.fillRect(b.x, b.y, b.w, b.h);
+      }
+
+      function drawMissile(m) {
+        ctx.save();
+        ctx.translate(m.x + m.w/2, m.y + m.h/2);
+        ctx.rotate(m.a || 0);
+        ctx.fillStyle = '#ffdd55';
+        roundRect(ctx, -m.w/2, -m.h/2, m.w, m.h, 3);
+        ctx.fill();
+        // flame
+        ctx.fillStyle = 'rgba(255, 120, 60, 0.9)';
+        ctx.beginPath();
+        ctx.moveTo(-m.w/2, 0);
+        ctx.lineTo(-m.w/2 - 6, -3);
+        ctx.lineTo(-m.w/2 - 6, 3);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+
+      function drawExplosion(ex) {
+        const alpha = 1 - ex.t / ex.ttl;
+        const r = ex.r;
+        // ring
+        ctx.strokeStyle = `rgba(255, 220, 120, ${alpha})`;
+        ctx.lineWidth = 6 * alpha;
+        ctx.beginPath();
+        ctx.arc(ex.x, ex.y, r, 0, Math.PI * 2);
+        ctx.stroke();
+        // inner
+        const grd = ctx.createRadialGradient(ex.x, ex.y, 0, ex.x, ex.y, r);
+        grd.addColorStop(0, `rgba(255, 210, 90, ${0.3 * alpha})`);
+        grd.addColorStop(1, 'rgba(255, 210, 90, 0)');
+        ctx.fillStyle = grd;
+        ctx.beginPath();
+        ctx.arc(ex.x, ex.y, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      function drawParticles(dt) {
+        for (let i = particles.length - 1; i >= 0; i--) {
+          const p = particles[i];
+          p.t += dt;
+          p.x += p.vx;
+          p.y += p.vy;
+          const a = 1 - p.t / p.life;
+          ctx.fillStyle = p.color.replace(')', `, ${Math.max(0, a)})`).replace('rgb', 'rgba');
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+          ctx.fill();
+          if (p.t >= p.life) particles.splice(i, 1);
+        }
+      }
+
+      function roundRect(ctx, x, y, w, h, r) {
+        const rr = Math.min(r, w/2, h/2);
+        ctx.beginPath();
+        ctx.moveTo(x + rr, y);
+        ctx.arcTo(x + w, y, x + w, y + h, rr);
+        ctx.arcTo(x + w, y + h, x, y + h, rr);
+        ctx.arcTo(x, y + h, x, y, rr);
+        ctx.arcTo(x, y, x + w, y, rr);
+        ctx.closePath();
+      }
+
+      // Mechanics
+      function scrollSpeed() {
+        // convert km/h to px per frame factor; tune multiplier
+        return player.speed * 0.4; // px/s baseline
+      }
+
+      function shootBullet() {
+        const now = performance.now();
+        if (now - lastShotAt < GUN_COOLDOWN) return;
+        if (!player.alive) return;
+        lastShotAt = now;
+        const bW = 4, bH = 14;
+        bullets.push({
+          x: player.x + player.w/2 - bW/2,
+          y: player.y - 6,
+          w: bW, h: bH,
+          vy: -12,
+        });
+      }
+
+      function fireMissile() {
+        const now = performance.now();
+        if (now - lastMissileAt < MISSILE_COOLDOWN) return;
+        if (missiles <= 0 || !player.alive) return;
+        lastMissileAt = now;
+        missiles--;
+
+        // target nearest car ahead
+        let target = null;
+        let bestDist = Infinity;
+        for (const c of cars) {
+          if (c.y + c.h < player.y) {
+            const dx = (c.x + c.w/2) - (player.x + player.w/2);
+            const dy = (c.y + c.h/2) - (player.y + player.h/2);
+            const d2 = dx*dx + dy*dy;
+            if (d2 < bestDist) { bestDist = d2; target = c; }
+          }
+        }
+        const m = {
+          x: player.x + player.w/2 - 6,
+          y: player.y - 10,
+          w: 12, h: 22,
+          vx: 0, vy: -6,
+          a: 0,
+          target,
+          turn: 0.08,
+          speed: 6.5,
         };
-
-        // Player
-        createTexture('player', 16, 24, g => {
-            g.fillStyle(0x4a4a4a);
-            g.fillRect(0, 0, 16, 18);
-            g.fillStyle(0x1e50a0);
-            g.fillRect(0, 18, 16, 6);
-            g.fillStyle(0xffcc99);
-            g.fillRect(4, 2, 8, 8);
-        });
-
-        // Wood
-        createTexture('wood', 20, 8, g => {
-            g.fillStyle(0x8b4513);
-            g.fillRect(0, 0, 20, 8);
-            g.fillStyle(0x654321);
-            g.fillRect(0, 0, 20, 2);
-        });
-
-        // Stone
-        createTexture('stone', 12, 12, g => {
-            g.fillStyle(0x808080);
-            g.fillRect(0, 0, 12, 12);
-            g.fillStyle(0x696969);
-            g.fillRect(2, 2, 8, 8);
-        });
-        
-        // Campfire States
-        createTexture('campfire_empty', 48, 48, g => {
-            const stones = [[16, 4], [32, 10], [36, 24], [24, 36], [10, 32], [4, 16]];
-            g.fillStyle(0x808080);
-            stones.forEach(s => g.fillRect(s[0], s[1], 12, 12));
-        });
-
-        createTexture('campfire_pit', 48, 48, g => {
-            const stones = [[16, 4], [32, 10], [36, 24], [24, 36], [10, 32], [4, 16]];
-            g.fillStyle(0x808080);
-            stones.forEach(s => g.fillRect(s[0], s[1], 12, 12));
-        });
-
-        createTexture('campfire_wood', 48, 48, g => {
-            const stones = [[16, 4], [32, 10], [36, 24], [24, 36], [10, 32], [4, 16]];
-            g.fillStyle(0x808080);
-            stones.forEach(s => g.fillRect(s[0], s[1], 12, 12));
-            g.fillStyle(0x8b4513);
-            g.fillRect(18, 18, 18, 6);
-            g.fillRect(20, 24, 6, 10);
-        });
-
-        createTexture('campfire_lit', 48, 48, g => {
-            const stones = [[16, 4], [32, 10], [36, 24], [24, 36], [10, 32], [4, 16]];
-            g.fillStyle(0x808080);
-            stones.forEach(s => g.fillRect(s[0], s[1], 12, 12));
-            g.fillStyle(0xff6600);
-            g.fillRect(18, 16, 12, 12);
-            g.fillStyle(0xffaa00);
-            g.fillRect(20, 12, 8, 8);
-            g.fillStyle(0xffff00);
-            g.fillRect(22, 10, 4, 4);
-        });
-
-        // Tent States
-        createTexture('tent_materials', 64, 32, g => {
-            g.fillStyle(0x8b4513);
-            g.fillRect(0, 24, 64, 8);
-            g.fillStyle(0x006400);
-            g.fillRect(10, 0, 20, 24);
-        });
-
-        createTexture('tent_pitched', 64, 48, g => {
-            g.fillStyle(0x008000);
-            g.fillTriangle(0, 48, 32, 0, 64, 48);
-            g.fillStyle(0x006400);
-            g.fillTriangle(24, 48, 32, 16, 40, 48);
-        });
-    }
-    
-    // Create simple procedural sounds
-    createSimpleAudio() {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        
-        // Water ambient sound (low-pass filtered noise)
-        const waterBuffer = ctx.createBuffer(1, ctx.sampleRate * 3, ctx.sampleRate);
-        const waterData = waterBuffer.getChannelData(0);
-        for (let i = 0; i < waterData.length; i++) {
-            waterData[i] = (Math.random() * 2 - 1) * 0.1;
-        }
-        
-        // Cricket sound (modulated sine)
-        const cricketBuffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
-        const cricketData = cricketBuffer.getChannelData(0);
-        for (let i = 0; i < cricketData.length; i++) {
-            const t = i / ctx.sampleRate;
-            cricketData[i] = Math.sin(t * 2 * Math.PI * 1500) * 
-                             (Math.sin(t * 2 * Math.PI * 5) * 0.5 + 0.5) * 0.05;
-        }
-        
-        // Fire crackle (short noise bursts)
-        const fireBuffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
-        const fireData = fireBuffer.getChannelData(0);
-        for (let i = 0; i < fireData.length; i++) {
-            fireData[i] = Math.random() < 0.01 ? (Math.random() * 2 - 1) * 0.5 : 0;
-        }
-        
-        return { water: waterBuffer, cricket: cricketBuffer, fire: fireBuffer };
-    }
-    
-    create() {
-      this.gameState = 'PLAYING';
-      this.inventory = { wood: 0, stone: 0 };
-      this.required = { wood: 3, stone: 4 };
-
-      this.goals = {
-          campfire: 'NEEDS_PIT',
-          tent: 'NOT_PITCHED'
-      };
-
-      this.interacting = false;
-
-      this.createLandscape();
-      this.initLightingAndCycle();
-      this.initSounds();
-
-      this.createPlayer();
-      this.createCollectibles();
-      this.createCampfire();
-      this.createTent();
-      this.createUI();
-
-      this.keys = this.input.keyboard.addKeys('W,A,S,D');
-
-      this.physics.add.overlap(this.player, this.collectibles, this.collectItem, null, this);
-      this.physics.add.overlap(this.player, this.campfire, this.interactWithCampfire, null, this);
-      this.physics.add.overlap(this.player, this.tent, this.interactWithTent, null, this);
-    }
-
-    update() {
-      if (this.gameState === 'PLAYING') {
-        this.updatePlayer();
+        missilesArr.push(m);
       }
-    }
 
-    createLandscape() {
-      this.add.rectangle(450, 380, 900, 440, 0x1a4d1a).setDepth(-1);
-      this.add.rectangle(450, 80, 900, 160, 0x0055aa).setDepth(-1);
-    }
+      // Mobile tap handling (simple zones)
+      let isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+      let touchState = { left:false, right:false, up:false, down:false, shoot:false, missile:false };
+      if (isMobile) {
+        tapHint.style.display = 'block';
+        container.addEventListener('touchstart', onTouch, { passive: false });
+        container.addEventListener('touchmove', onTouch, { passive: false });
+        container.addEventListener('touchend', onTouchEnd, { passive: false });
+      }
 
-    initLightingAndCycle() {
-        this.lights.enable();
-        this.lights.setAmbientColor(0xdddddd);
+      function onTouch(e) {
+        e.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        touchState = { left:false, right:false, up:false, down:false, shoot:false, missile:false };
+        for (const t of e.touches) {
+          const x = t.clientX - rect.left;
+          const y = t.clientY - rect.top;
+          if (y < rect.height * 0.35) {
+            touchState.shoot = true;
+          } else if (x < rect.width * 0.33) {
+            touchState.left = true;
+          } else if (x > rect.width * 0.66) {
+            touchState.right = true;
+          } else if (y > rect.height * 0.7 && x > rect.width * 0.55) {
+            touchState.missile = true;
+          }
+        }
+        if (touchState.shoot) shootBullet();
+        if (touchState.missile) fireMissile();
+      }
 
-        const dayColor = new Phaser.Display.Color(221, 221, 221);
-        const nightColor = new Phaser.Display.Color(20, 20, 50);
+      function onTouchEnd(e) {
+        e.preventDefault();
+        touchState = { left:false, right:false, up:false, down:false, shoot:false, missile:false };
+      }
 
-        this.tweens.add({
-            targets: { value: 0 },
-            value: 1,
-            duration: 180000,
-            ease: 'Sine.easeInOut',
-            onUpdate: (tween) => {
-                const colorObject = Phaser.Display.Color.Interpolate.ColorWithColor(
-                    dayColor, nightColor, 100, tween.getValue() * 100
-                );
-                const color = Phaser.Display.Color.GetColor(colorObject.r, colorObject.g, colorObject.b);
-                this.lights.setAmbientColor(color);
+      // Input keyboard
+      window.addEventListener('keydown', (e) => {
+        keys[e.key.toLowerCase()] = true;
+        if (e.code === 'Space') { shootBullet(); e.preventDefault(); }
+        if (e.key.toLowerCase() === 'm') { fireMissile(); }
+        if (e.key.toLowerCase() === 'r' && gameOver) { reset(); }
+      }, { passive: false });
+
+      window.addEventListener('keyup', (e) => {
+        keys[e.key.toLowerCase()] = false;
+      });
+
+      // Main update
+      function update(dt) {
+        if (!player.alive) return;
+
+        // speed control
+        if (keys['w'] || keys['arrowup']) player.speed = clamp(player.speed + dt * 55, 80, 220);
+        else if (keys['s'] || keys['arrowdown']) player.speed = clamp(player.speed - dt * 75, 60, 220);
+        else player.speed = clamp(player.speed + (110 - player.speed) * 0.02, 60, 220);
+
+        // move player
+        const steer = (keys['a'] || keys['arrowleft'] || touchState.left ? -1 : 0) +
+                      (keys['d'] || keys['arrowright'] || touchState.right ? 1 : 0);
+        player.vx = steer * 4.2;
+        player.x += player.vx * (dt / (1000/60)) * 3.2;
+        player.x = clamp(player.x, ROAD.x + 4, ROAD.x + ROAD.w - player.w - 4);
+
+        // spawning traffic
+        spawnTimer -= dt;
+        const density = clamp(1.0 + (score / 4000), 1, 2.2);
+        if (spawnTimer <= 0) {
+          spawnCar();
+          spawnTimer = spawnInterval / density;
+        }
+
+        // move cars
+        for (let i = cars.length - 1; i >= 0; i--) {
+          const c = cars[i];
+          c.y += (scrollSpeed() * 0.016 + c.speed * 1.4) * (dt / (1000/60));
+          if (c.y > WORLD.h + 40) {
+            cars.splice(i, 1);
+            continue;
+          }
+          // collision with player
+          if (rectsOverlap(player, c)) {
+            player.alive = false;
+            gameOver = true;
+            bannerTitle.textContent = 'Crashed!';
+            banner.style.display = 'block';
+          }
+        }
+
+        // bullets
+        for (let i = bullets.length - 1; i >= 0; i--) {
+          const b = bullets[i];
+          b.y += b.vy * (dt / (1000/60)) * 12;
+          if (b.y + b.h < -20) { bullets.splice(i, 1); continue; }
+
+          for (let j = cars.length - 1; j >= 0; j--) {
+            const c = cars[j];
+            if (rectsOverlap(b, c)) {
+              bullets.splice(i, 1);
+              cars.splice(j, 1);
+              kills++;
+              score += 120;
+              // small explosion particles
+              addExplosion(c.x + c.w/2, c.y + c.h/2, 60);
+              // small chance to drop missile
+              if (Math.random() < 0.08) missiles = Math.min(missiles + 1, 6);
+              break;
             }
-        });
-    }
-
-    initSounds() {
-        // Play simple ambient sounds using Web Audio API
-        try {
-            const audioBuffers = this.createSimpleAudio();
-            const ctx = new (window.AudioContext || window.webkitAudioContext)();
-            
-            // Water sound
-            const waterSource = ctx.createBufferSource();
-            waterSource.buffer = audioBuffers.water;
-            waterSource.loop = true;
-            const waterGain = ctx.createGain();
-            waterGain.gain.value = 0.2;
-            waterSource.connect(waterGain);
-            waterGain.connect(ctx.destination);
-            waterSource.start(0);
-            
-            // Cricket sound
-            const cricketSource = ctx.createBufferSource();
-            cricketSource.buffer = audioBuffers.cricket;
-            cricketSource.loop = true;
-            const cricketGain = ctx.createGain();
-            cricketGain.gain.value = 0.1;
-            cricketSource.connect(cricketGain);
-            cricketGain.connect(ctx.destination);
-            cricketSource.start(0);
-            
-            // Fire sound (stored for later volume control)
-            this.fireSource = ctx.createBufferSource();
-            this.fireSource.buffer = audioBuffers.fire;
-            this.fireSource.loop = true;
-            this.fireGain = ctx.createGain();
-            this.fireGain.gain.value = 0;
-            this.fireSource.connect(this.fireGain);
-            this.fireGain.connect(ctx.destination);
-            this.fireSource.start(0);
-        } catch (e) {
-            console.log('Audio context not available');
+          }
         }
-    }
 
-    createPlayer() {
-      this.player = this.physics.add.sprite(100, 300, 'player');
-      this.player.setCollideWorldBounds(true);
-      this.player.setDepth(5);
-      this.player.speed = 200;
-    }
+        // missiles
+        for (let i = missilesArr.length - 1; i >= 0; i--) {
+          const m = missilesArr[i];
+          // reacquire target if lost
+          if (!m.target || !cars.includes(m.target) || (m.target.y + m.target.h) > (player.y + player.h)) {
+            // find any ahead
+            let t = null; let best = Infinity;
+            for (const c of cars) {
+              if (c.y + c.h < player.y) {
+                const dx = (c.x + c.w/2) - (m.x + m.w/2);
+                const dy = (c.y + c.h/2) - (m.y + m.h/2);
+                const d2 = dx*dx + dy*dy;
+                if (d2 < best) { best = d2; t = c; }
+              }
+            }
+            m.target = t || null;
+          }
 
-    createCollectibles() {
-      this.collectibles = this.physics.add.group();
-      const spawnArea = new Phaser.Geom.Rectangle(50, 200, 800, 350);
+          // steer towards target
+          if (m.target) {
+            const tx = m.target.x + m.target.w/2;
+            const ty = m.target.y + m.target.h/2;
+            const dx = tx - (m.x + m.w/2);
+            const dy = ty - (m.y + m.h/2);
+            const ang = Math.atan2(dy, dx);
+            // turn current angle towards ang
+            const cur = m.a || -Math.PI/2;
+            let diff = ((ang - cur + Math.PI*3) % (Math.PI*2)) - Math.PI;
+            m.a = cur + clamp(diff, -m.turn, m.turn);
+            m.vx = Math.cos(m.a) * m.speed;
+            m.vy = Math.sin(m.a) * m.speed;
+          } else {
+            m.a = -Math.PI/2;
+            m.vx = 0;
+            m.vy = -m.speed * 1.1;
+          }
 
-      const spawnItems = (key, type, count) => {
-        for (let i = 0; i < count; i++) {
-            let pos = Phaser.Geom.Rectangle.Random(spawnArea);
-            const item = this.collectibles.create(pos.x, pos.y, key);
-            item.itemType = type;
-            item.setDepth(1);
+          m.x += m.vx * (dt / (1000/60)) * 6;
+          m.y += m.vy * (dt / (1000/60)) * 6;
+
+          // collision with cars or out of bounds
+          let hit = false;
+          for (let j = cars.length - 1; j >= 0; j--) {
+            const c = cars[j];
+            if (rectsOverlap({x:m.x, y:m.y, w:m.w, h:m.h}, c)) {
+              hit = true;
+              break;
+            }
+          }
+          if (hit || m.y < -40 || m.x < -40 || m.x > WORLD.w + 40) {
+            // explode
+            addExplosion(m.x + m.w/2, m.y + m.h/2, 110);
+            missilesArr.splice(i, 1);
+          }
         }
-      };
 
-      spawnItems('wood', 'wood', 8);
-      spawnItems('stone', 'stone', 10);
-    }
-    
-    createCampfire() {
-      this.campfire = this.physics.add.sprite(450, 300, 'campfire_empty');
-      this.campfire.setImmovable(true);
-      this.campfire.setDepth(1);
-      this.campfireLight = null;
-    }
-
-    createTent() {
-      this.tent = this.physics.add.sprite(750, 450, 'tent_materials');
-      this.tent.setImmovable(true);
-      this.tent.setDepth(1);
-    }
-
-    updatePlayer() {
-      this.player.setVelocity(0);
-      if (this.keys.W.isDown) this.player.setVelocityY(-this.player.speed);
-      if (this.keys.S.isDown) this.player.setVelocityY(this.player.speed);
-      if (this.keys.A.isDown) this.player.setVelocityX(-this.player.speed);
-      if (this.keys.D.isDown) this.player.setVelocityX(this.player.speed);
-    }
-
-    collectItem(player, item) {
-      this.inventory[item.itemType]++;
-      item.destroy();
-      this.updateUI();
-    }
-
-    interactWithCampfire() {
-        if (this.interacting) return;
-        
-        if (this.goals.campfire === 'NEEDS_PIT' && this.inventory.stone >= this.required.stone) {
-            this.interacting = true;
-            this.inventory.stone -= this.required.stone;
-            this.goals.campfire = 'NEEDS_WOOD';
-            this.campfire.setTexture('campfire_pit');
-            this.updateUI();
-            this.time.delayedCall(500, () => { this.interacting = false; });
-        } else if (this.goals.campfire === 'NEEDS_WOOD' && this.inventory.wood >= this.required.wood) {
-            this.interacting = true;
-            this.inventory.wood -= this.required.wood;
-            this.goals.campfire = 'LIT';
-            this.campfire.setTexture('campfire_lit');
-            this.lightTheFire();
-            this.updateUI();
-            this.checkWinCondition();
-            this.time.delayedCall(500, () => { this.interacting = false; });
-        }
-    }
-
-    interactWithTent() {
-        if (this.interacting) return;
-        
-        if (this.goals.tent === 'NOT_PITCHED') {
-            this.interacting = true;
-            this.goals.tent = 'PITCHED';
-            this.tent.setTexture('tent_pitched');
-            this.updateUI();
-            this.checkWinCondition();
-            this.time.delayedCall(500, () => { this.interacting = false; });
-        }
-    }
-
-    lightTheFire() {
-        if (this.fireGain) {
-            this.tweens.add({
-                targets: this.fireGain.gain,
-                value: 0.6,
-                duration: 1000
-            });
-        }
-        
-        if (this.campfireLight) {
-            this.campfireLight.destroy();
-        }
-        
-        this.campfireLight = this.lights.addLight(this.campfire.x, this.campfire.y, 250, 0xffa500, 1.5);
-
-        this.time.addEvent({
-            delay: 100,
-            loop: true,
-            callback: () => {
-                if (this.campfireLight) {
-                    this.campfireLight.intensity = 1.5 + Math.random() * 0.5;
-                    this.campfireLight.radius = 250 + Math.random() * 30;
+        // explosions damage once on early growth
+        for (let i = explosions.length - 1; i >= 0; i--) {
+          const ex = explosions[i];
+          ex.t += dt;
+          const grow = Math.min(1, ex.t / 200);
+          ex.r = ex.maxR * grow;
+          if (!ex.didDamage && grow > 0.5) {
+            ex.didDamage = true;
+            // destroy cars within radius
+            for (let j = cars.length - 1; j >= 0; j--) {
+              const c = cars[j];
+              if (circleRectOverlap(ex.x, ex.y, ex.r, c)) {
+                cars.splice(j, 1);
+                kills++;
+                score += 180;
+                // chain particles
+                for (let k = 0; k < 8; k++) {
+                  particles.push({
+                    x: c.x + c.w/2, y: c.y + c.h/2,
+                    vx: rand(-1.5, 1.5), vy: rand(-1.5, 1.5),
+                    life: rand(250, 550), t: 0, color: '#ff9966', size: rand(1.5, 3.5)
+                  });
                 }
+                if (Math.random() < 0.12) missiles = Math.min(missiles + 1, 6);
+              }
             }
-        });
-    }
-
-    checkWinCondition() {
-        if (this.goals.campfire === 'LIT' && this.goals.tent === 'PITCHED') {
-            this.gameState = 'WON';
-            this.time.delayedCall(1000, this.showVictory, [], this);
+          }
+          if (ex.t >= ex.ttl) explosions.splice(i, 1);
         }
-    }
 
-    showVictory() {
-      this.add.rectangle(450, 300, 900, 600, 0x000000, 0.8).setDepth(100);
-      this.add.text(450, 250, 'Camp is Set!', {
-        fontFamily: 'monospace', fontSize: 48, color: '#ffff00', fontStyle: 'bold', align: 'center'
-      }).setOrigin(0.5).setDepth(101);
-      this.add.text(450, 320, 'You survived the night!', {
-        fontFamily: 'monospace', fontSize: 24, color: '#cccccc', align: 'center'
-      }).setOrigin(0.5).setDepth(101);
-      this.add.text(450, 450, 'Click to Play Again', {
-        fontFamily: 'monospace', fontSize: 18, color: '#888888', align: 'center'
-      }).setOrigin(0.5).setDepth(101).setInteractive();
-      this.input.once('pointerdown', () => this.scene.restart());
-    }
-
-    createUI() {
-      const style = { fontFamily: 'monospace', fontSize: 16, color: '#ffffff', backgroundColor: 'rgba(0,0,0,0.5)', padding: { x: 8, y: 4 }};
-      this.stoneText = this.add.text(16, 16, '', style).setDepth(50);
-      this.woodText = this.add.text(16, 46, '', style).setDepth(50);
-      this.fireText = this.add.text(16, 76, '', style).setDepth(50);
-      this.tentText = this.add.text(16, 106, '', style).setDepth(50);
-      this.updateUI();
-    }
-
-    updateUI() {
-        this.stoneText.setText(`Stones: ${this.inventory.stone} / ${this.required.stone}`);
-        this.woodText.setText(`Wood:   ${this.inventory.wood} / ${this.required.wood}`);
-
-        let fireStatus = '';
-        switch(this.goals.campfire) {
-            case 'NEEDS_PIT': fireStatus = `🔥 Bring ${this.required.stone} stones to fire pit`; break;
-            case 'NEEDS_WOOD': fireStatus = `🔥 Bring ${this.required.wood} wood to fire pit`; break;
-            case 'LIT': fireStatus = '✅ Fire is lit!'; break;
-        }
-        this.fireText.setText(fireStatus);
-        
-        let tentStatus = this.goals.tent === 'PITCHED' ? '✅ Tent is pitched!' : '⛺ Go to tent materials to build';
-        this.tentText.setText(tentStatus);
-    }
-  }
-  </script>
-
-  <script>
-  const config = {
-    type: Phaser.AUTO,
-    width: 900,
-    height: 600,
-    backgroundColor: 0x001a33,
-    physics: {
-      default: 'arcade',
-      arcade: {
-        gravity: { y: 0 },
-        debug: false
+        // score by distance
+        score += dt * (player.speed / 32);
       }
-    },
-    scene: [CampingScene]
-  };
-  </script>
 
-  <script>
-  window.onload = () => {
-    const game = new Phaser.Game(config);
-  };
-  </script>
+      // Main loop
+      function loop(now) {
+        const dt = Math.min(50, now - time);
+        time = now;
 
+        ctx.clearRect(0, 0, WORLD.w, WORLD.h);
+
+        drawRoad(dt);
+
+        // update or stop if game over
+        if (!gameOver) update(dt);
+
+        // draw cars
+        for (const c of cars) drawCar(c);
+
+        // draw bullets
+        for (const b of bullets) drawBullet(b);
+
+        // draw missiles
+        for (const m of missilesArr) drawMissile(m);
+
+        // draw explosions
+        for (const ex of explosions) drawExplosion(ex);
+
+        // draw particles
+        drawParticles(dt);
+
+        // draw player last
+        if (player.alive) drawPlayer();
+
+        // UI update
+        uiScore.textContent = Math.floor(score).toLocaleString();
+        uiSpeed.textContent = Math.floor(player.speed);
+        uiKills.textContent = kills;
+        uiMissiles.textContent = missiles;
+
+        // cooldown bars
+        const nowMs = performance.now();
+        const gunPct = clamp((nowMs - lastShotAt) / GUN_COOLDOWN, 0, 1) * 100;
+        uiGunBar.style.width = gunPct + '%';
+        const misPct = clamp((nowMs - lastMissileAt) / MISSILE_COOLDOWN, 0, 1) * 100;
+        uiMissileBar.style.width = misPct + '%';
+
+        requestAnimationFrame(loop);
+      }
+
+      // Gun auto fire on hold
+      setInterval(() => {
+        if (!player.alive) return;
+        if (keys[' '] || keys['space']) shootBullet();
+      }, 40);
+
+      // Resize and start
+      window.addEventListener('resize', fit);
+      fit();
+      reset();
+      requestAnimationFrame((t) => { time = t; loop(t); });
+
+      // Initial car seeding
+      for (let i = 0; i < 5; i++) {
+        spawnCar();
+        cars[cars.length - 1].y = -i * 140 - 80;
+      }
+    })();
+  </script>
 </body>
 </html>

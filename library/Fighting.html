@@ -1,358 +1,663 @@
-
 <!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Fighting Game - Human vs AI</title>
+  <title>Fighting Game - 1v1</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    html,body { margin:0; padding:0; background:#111; height:100%; }
-    .hint { position: absolute; right: 12px; top: 12px; color:#ddd; font-family: monospace; font-size:13px; background: rgba(0,0,0,0.25); padding:8px; border-radius:6px; z-index: 1000;}
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);
+      height: 100%;
+      font-family: 'Courier New', monospace;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden;
+    }
+
+    .game-container {
+      position: relative;
+      background: radial-gradient(ellipse at center, #1a1a2e 0%, #0a0a0a 100%);
+      border-radius: 12px;
+      box-shadow:
+        0 0 60px rgba(100, 200, 255, 0.3),
+        inset 0 0 40px rgba(0, 0, 0, 0.5);
+      overflow: hidden;
+    }
+
+    canvas {
+      display: block;
+      background: linear-gradient(180deg, #2d2d44 0%, #1a1a2e 100%);
+    }
+
+    .ui-overlay {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      right: 12px;
+      color: #fff;
+      font-size: 14px;
+      font-weight: bold;
+      text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+      z-index: 10;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .player-hp {
+      color: #33aaff;
+      background: rgba(0, 0, 0, 0.3);
+      padding: 8px 12px;
+      border-radius: 4px;
+      border-left: 3px solid #33aaff;
+    }
+
+    .ai-hp {
+      color: #ff5566;
+      background: rgba(0, 0, 0, 0.3);
+      padding: 8px 12px;
+      border-radius: 4px;
+      border-right: 3px solid #ff5566;
+      text-align: right;
+    }
+
+    .hint {
+      position: absolute;
+      left: 12px;
+      bottom: 12px;
+      color: #888;
+      font-size: 12px;
+      background: rgba(0, 0, 0, 0.4);
+      padding: 8px 12px;
+      border-radius: 6px;
+      border: 1px solid rgba(100, 200, 255, 0.2);
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+      z-index: 10;
+    }
+
+    .fight-over-screen {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.9);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 100;
+      cursor: pointer;
+      backdrop-filter: blur(4px);
+    }
+
+    .winner-text {
+      font-size: 64px;
+      font-weight: bold;
+      text-shadow: 0 0 20px rgba(255, 255, 0, 0.8);
+      margin-bottom: 20px;
+      animation: pulse 1s infinite;
+    }
+
+    .ko-text {
+      font-size: 48px;
+      font-weight: bold;
+      color: #fff;
+      text-shadow: 0 0 15px rgba(255, 255, 0, 0.6);
+      margin-bottom: 40px;
+      animation: shake 0.3s;
+    }
+
+    .restart-hint {
+      color: #888;
+      font-size: 14px;
+      margin-top: 20px;
+      animation: blink 1s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.1); }
+    }
+
+    @keyframes shake {
+      0%, 100% { transform: translateX(0) rotateZ(0deg); }
+      25% { transform: translateX(-15px) rotateZ(-5deg); }
+      75% { transform: translateX(15px) rotateZ(5deg); }
+    }
+
+    @keyframes blink {
+      0%, 50%, 100% { opacity: 1; }
+      25%, 75% { opacity: 0.5; }
+    }
   </style>
 </head>
 <body>
-  <div class="hint">A/D to move • W to jump • F to punch</div>
+  <div class="game-container">
+    <canvas id="gameCanvas"></canvas>
+    <div class="ui-overlay">
+      <div class="player-hp" id="playerHP">PLAYER: ♥♥♥♥♥</div>
+      <div class="ai-hp" id="aiHP">AI: ♥♥♥♥♥</div>
+    </div>
+    <div class="hint">A/D to move • W to jump • F to punch</div>
+  </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
-
-  <!-- REGION:SCENE_CLASS_START -->
   <script>
-  class FightScene extends Phaser.Scene {
-    constructor() { super('FightScene'); }
-    
-    preload() {
-      this.generateTextures();
+    // ============================================
+    // CANVAS SETUP
+    // ============================================
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    function resizeCanvas() {
+      const maxWidth = Math.min(960, window.innerWidth - 20);
+      const maxHeight = Math.min(540, window.innerHeight - 20);
+      canvas.width = maxWidth;
+      canvas.height = maxHeight;
     }
-    
-    generateTextures() {
-      // Player texture (blue)
-      if (!this.textures.exists('p1tex')) {
-        const g = this.add.graphics();
-        g.fillStyle(0x33aaff, 1);
-        g.fillRect(0, 0, 40, 60);
-        g.fillStyle(0xffffff, 1);
-        g.fillCircle(20, 15, 8);
-        g.fillStyle(0x000000, 1);
-        g.fillCircle(20, 15, 3);
-        g.generateTexture('p1tex', 40, 60);
-        g.destroy();
-      }
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
 
-      // AI texture (red)
-      if (!this.textures.exists('p2tex')) {
-        const g = this.add.graphics();
-        g.fillStyle(0xff5566, 1);
-        g.fillRect(0, 0, 40, 60);
-        g.fillStyle(0xffffff, 1);
-        g.fillCircle(20, 15, 8);
-        g.fillStyle(0x000000, 1);
-        g.fillCircle(20, 15, 3);
-        g.generateTexture('p2tex', 40, 60);
-        g.destroy();
-      }
+    // ============================================
+    // GAME STATE (✅ EASY TO MODIFY)
+    // ============================================
+    const game = {
+      // Stage/Environment (✅ Adjust stage size)
+      stage: {
+        width: 0,
+        height: 0,
+        groundY: 0,
+        bgColor: '#2d2d44'
+      },
 
-      // Ground texture
-      if (!this.textures.exists('ground')) {
-        const g = this.add.graphics();
-        g.fillStyle(0x2d2d44, 1);
-        g.fillRect(0, 0, 64, 40);
-        g.generateTexture('ground', 64, 40);
-        g.destroy();
+      // Player character (✅ Adjust player stats)
+      player: {
+        x: 0,
+        y: 0,
+        width: 40,
+        height: 60,
+        velX: 0,
+        velY: 0,
+        speed: 4,             // ✅ Movement speed
+        jumpForce: 12,        // ✅ Jump height
+        hp: 5,                // ✅ Starting HP
+        maxHp: 5,
+        cooldown: false,
+        cooldownTime: 400,    // ✅ Milliseconds between attacks
+        facing: 1,            // 1 = right, -1 = left
+        color: '#33aaff',     // ✅ Character color
+        attackRange: 45,      // ✅ Attack reach
+        attackDamage: 1       // ✅ Damage per hit
+      },
+
+      // AI opponent (✅ Adjust AI difficulty)
+      ai: {
+        x: 0,
+        y: 0,
+        width: 40,
+        height: 60,
+        velX: 0,
+        velY: 0,
+        speed: 3.5,           // ✅ AI speed (lower = easier)
+        jumpForce: 12,
+        hp: 5,
+        maxHp: 5,
+        cooldown: false,
+        cooldownTime: 400,
+        facing: -1,
+        color: '#ff5566',     // ✅ AI color
+        attackRange: 45,
+        attackDamage: 1,
+        // AI behavior (✅ Adjust AI difficulty)
+        aiState: 'approach',
+        reactionTime: 0,
+        reactionDelay: 150,   // ✅ Lower = faster reactions (harder)
+        attackProbability: 0.3, // ✅ 0-1, higher = attacks more
+        aggressiveness: 0.6   // ✅ 0-1, higher = more aggressive
+      },
+
+      // Physics (✅ Adjust physics feel)
+      physics: {
+        gravity: 0.45,        // ✅ Gravity strength
+        friction: 0.95,
+        groundFriction: 0.92
+      },
+
+      // Input
+      keys: {},
+
+      // Particles & Effects
+      particles: [],
+      effects: [],
+
+      // Game state
+      gameRunning: true,
+      gameOver: false,
+      winner: null,
+      lastAIUpdateTime: 0
+    };
+
+    // Initialize stage
+    game.stage.width = canvas.width;
+    game.stage.height = canvas.height;
+    game.stage.groundY = canvas.height - 60;
+
+    // Initialize player
+    game.player.x = 150;
+    game.player.y = game.stage.groundY - game.player.height;
+
+    // Initialize AI
+    game.ai.x = canvas.width - 150;
+    game.ai.y = game.stage.groundY - game.ai.height;
+
+    // ============================================
+    // PARTICLES (Visual effects)
+    // ============================================
+    function createPunchEffect(x, y, facing) {
+      for (let i = 0; i < 8; i++) {
+        const angle = (Math.PI * 2 * i) / 8;
+        const speed = 3 + Math.random() * 2;
+        game.particles.push({
+          x: x,
+          y: y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: 1,
+          color: '#ffff00',
+          size: 4 + Math.random() * 3
+        });
       }
     }
-    
-    create() {
-      this.createStage();
-      this.createPlayers();
-      this.createUI();
 
-      this.physics.add.collider(this.player, this.platforms);
-      this.physics.add.collider(this.ai, this.platforms);
+    function createHitEffect(x, y) {
+      for (let i = 0; i < 12; i++) {
+        const angle = (Math.PI * 2 * i) / 12;
+        const speed = 4 + Math.random() * 3;
+        game.particles.push({
+          x: x,
+          y: y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed - 1,
+          life: 1,
+          color: '#ff4444',
+          size: 3 + Math.random() * 2
+        });
+      }
+    }
 
-      // Only human player has keyboard input
-      this.input.keyboard.on('keydown-F', () => this.attack(this.player, this.ai));
-      
-      this.gameOver = false;
-      
-      // AI decision timer
-      this.aiTimer = this.time.addEvent({
-        delay: 150,
-        callback: this.updateAI,
-        callbackScope: this,
-        loop: true
+    function updateParticles() {
+      game.particles.forEach((p, idx) => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.15; // gravity
+        p.life -= 0.02;
+
+        if (p.life <= 0 || p.y > game.stage.groundY) {
+          game.particles.splice(idx, 1);
+        }
       });
     }
 
-    update() {
-      if (this.gameOver) return;
-      
-      this.updatePlayer(this.player, this.keys1);
+    function drawParticles() {
+      game.particles.forEach(p => {
+        ctx.fillStyle = p.color.replace(')', `, ${p.life * 0.7})`).replace('#ffff00', 'rgba(255, 255, 0').replace('#ff4444', 'rgba(255, 68, 68');
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, Math.max(0.5, p.size), 0, Math.PI * 2);
+        ctx.fill();
+      });
     }
 
-    createStage() {
-      this.platforms = this.physics.add.staticGroup();
-      
-      const groundY = this.scale.height - 20;
-      for (let x = 32; x < this.scale.width; x += 64) {
-        const ground = this.platforms.create(x, groundY, 'ground');
-        ground.setOrigin(0.5, 0.5).refreshBody();
+    // ============================================
+    // INPUT HANDLING
+    // ============================================
+    document.addEventListener('keydown', (e) => {
+      const key = e.key.toLowerCase();
+      game.keys[key] = true;
+
+      if (key === 'f') {
+        attack(game.player, game.ai);
       }
-    }
+    });
 
-    createPlayers() {
-      const groundY = this.scale.height - 40;
-      const spawnY = groundY - 30;
+    document.addEventListener('keyup', (e) => {
+      game.keys[e.key.toLowerCase()] = false;
+    });
 
-      // Human player
-      this.player = this.physics.add.sprite(200, spawnY, 'p1tex');
-      this.player.setCollideWorldBounds(true);
-      this.player.body.setSize(36, 58).setOffset(2, 1);
-      this.player.hp = 5;
-      this.player.cooldown = false;
-      this.player.facing = 1;
+    // ============================================
+    // PHYSICS & MOVEMENT
+    // ============================================
+    function updatePhysics(character) {
+      const isGrounded = character.y >= game.stage.groundY - character.height - 2;
 
-      // AI opponent
-      this.ai = this.physics.add.sprite(760, spawnY, 'p2tex');
-      this.ai.setCollideWorldBounds(true);
-      this.ai.body.setSize(36, 58).setOffset(2, 1);
-      this.ai.hp = 5;
-      this.ai.cooldown = false;
-      this.ai.facing = -1;
-      
-      // AI state
-      this.ai.state = 'approach';
-      this.ai.reactionTime = 0;
-
-      // Controls (only for player)
-      this.keys1 = this.input.keyboard.addKeys('A,D,W');
-    }
-
-    updatePlayer(player, keys) {
-      const isGrounded = player.body.touching.down;
-      
-      if (keys.left?.isDown || keys.A?.isDown) {
-        player.setVelocityX(-200);
-        player.facing = -1;
-      } else if (keys.right?.isDown || keys.D?.isDown) {
-        player.setVelocityX(200);
-        player.facing = 1;
+      // Apply gravity
+      if (!isGrounded) {
+        character.velY += game.physics.gravity;
       } else {
-        player.setVelocityX(0);
+        character.velY = 0;
+        character.y = game.stage.groundY - character.height;
       }
 
-      if ((keys.up?.isDown || keys.W?.isDown) && isGrounded) {
-        player.setVelocityY(-500);
+      // Apply friction
+      const friction = isGrounded ? game.physics.groundFriction : game.physics.friction;
+      character.velX *= friction;
+
+      // Apply velocity
+      character.x += character.velX;
+      character.y += character.velY;
+
+      // Clamp to world bounds
+      character.x = Math.max(0, Math.min(character.x, game.stage.width - character.width));
+
+      // Ensure grounded state
+      if (character.y > game.stage.groundY - character.height) {
+        character.y = game.stage.groundY - character.height;
       }
     }
 
-    updateAI() {
-      if (this.gameOver || !this.ai || !this.player) return;
+    // ============================================
+    // PLAYER CONTROL
+    // ============================================
+    function updatePlayer() {
+      if (!game.gameRunning) return;
 
-      const distance = Math.abs(this.ai.x - this.player.x);
-      const isGrounded = this.ai.body.touching.down;
-      
-      // Update facing direction
-      this.ai.facing = this.ai.x < this.player.x ? 1 : -1;
+      const p = game.player;
+      const keys = game.keys;
+      const isGrounded = p.y >= game.stage.groundY - p.height - 2;
 
-      // AI Decision Making
-      if (this.ai.reactionTime > 0) {
-        this.ai.reactionTime--;
-        return;
+      // Movement
+      if (keys['a'] || keys['arrowleft']) {
+        p.velX = -p.speed;
+        p.facing = -1;
+      } else if (keys['d'] || keys['arrowright']) {
+        p.velX = p.speed;
+        p.facing = 1;
       }
 
-      // State machine with decision tree
-      if (distance < 60) {
-        // Close range - attack or retreat
-        if (Math.random() > 0.3 && !this.ai.cooldown) {
-          this.attack(this.ai, this.player);
-          this.ai.reactionTime = Phaser.Math.Between(3, 6);
-        } else {
-          // Retreat
-          this.ai.setVelocityX(this.ai.facing * -150);
-        }
-      } else if (distance < 150) {
-        // Mid range - circle and attack
-        if (Math.random() > 0.6 && !this.ai.cooldown) {
-          this.attack(this.ai, this.player);
-          this.ai.reactionTime = Phaser.Math.Between(4, 8);
-        } else {
-          // Circle around
-          const circleDir = Math.random() > 0.5 ? 1 : -1;
-          this.ai.setVelocityX(circleDir * 120);
-        }
+      // Jump (✅ Easy to adjust jump feel)
+      if ((keys['w'] || keys[' '] || keys['arrowup']) && isGrounded) {
+        p.velY = -p.jumpForce;
+      }
+
+      updatePhysics(p);
+    }
+
+    // ============================================
+    // AI BEHAVIOR
+    // ============================================
+    function updateAI() {
+      if (!game.gameRunning || game.gameOver) return;
+
+      const ai = game.ai;
+      const p = game.player;
+      const isGrounded = ai.y >= game.stage.groundY - ai.height - 2;
+
+      // Distance calculation
+      const distance = Math.abs(ai.x - p.x);
+      const heightDiff = p.y - ai.y;
+
+      // Update facing
+      ai.facing = ai.x < p.x ? 1 : -1;
+
+      // Reaction time countdown
+      if (ai.reactionTime > 0) {
+        ai.reactionTime--;
       } else {
-        // Far range - approach
-        this.ai.setVelocityX(this.ai.facing * 180);
+        // AI Decision Making (✅ Easy to adjust behavior)
+        if (distance < 60) {
+          // Close range - attack or retreat
+          if (Math.random() > (1 - ai.attackProbability) && !ai.cooldown) {
+            attack(ai, p);
+            ai.reactionTime = 4 + Math.random() * 3;
+          } else {
+            // Retreat
+            ai.velX = ai.facing * -ai.speed * 1.5;
+            ai.reactionTime = 2;
+          }
+        } else if (distance < 200) {
+          // Mid range - circle and attack
+          if (Math.random() > 0.7 && !ai.cooldown) {
+            attack(ai, p);
+            ai.reactionTime = 4 + Math.random() * 4;
+          } else {
+            // Circle
+            const circleDir = Math.random() > 0.5 ? 1 : -1;
+            ai.velX = circleDir * ai.speed * 1.2;
+            ai.reactionTime = 3;
+          }
+        } else {
+          // Far range - approach
+          ai.velX = ai.facing * ai.speed * 1.3;
+          ai.reactionTime = 2;
+        }
       }
 
-      // Jump logic - if player is above or random jump
-      const heightDiff = this.player.y - this.ai.y;
+      // Jump logic (✅ AI jumping behavior)
       if (isGrounded) {
-        if (heightDiff < -50 || (Math.random() > 0.95 && distance < 200)) {
-          this.ai.setVelocityY(-500);
+        if (heightDiff < -30 || (Math.random() > 0.93 && distance < 250)) {
+          ai.velY = -ai.jumpForce;
         }
       }
 
-      // Random pause in movement
-      if (Math.random() > 0.92) {
-        this.ai.setVelocityX(0);
-        this.ai.reactionTime = Phaser.Math.Between(2, 5);
-      }
+      updatePhysics(ai);
     }
 
-    attack(attacker, defender) {
-      if (attacker.cooldown || this.gameOver) return;
-      
+    // ============================================
+    // ATTACK SYSTEM
+    // ============================================
+    function attack(attacker, defender) {
+      if (attacker.cooldown || game.gameOver) return;
+
       attacker.cooldown = true;
 
-      const hitZone = new Phaser.Geom.Rectangle(
-        attacker.x + (attacker.facing * 30), 
-        attacker.y - 30, 
-        45, 
-        60
+      // Create attack hitbox
+      const attackX = attacker.x + attacker.facing * (attacker.width / 2 + 15);
+      const attackY = attacker.y + attacker.height / 2;
+      const hitRadius = attacker.attackRange;
+
+      // Check if hit connects
+      const defCenterX = defender.x + defender.width / 2;
+      const defCenterY = defender.y + defender.height / 2;
+      const distance = Math.sqrt(
+        (attackX - defCenterX) ** 2 + (attackY - defCenterY) ** 2
       );
-      
-      const defBounds = defender.getBounds();
 
-      if (Phaser.Geom.Intersects.RectangleToRectangle(hitZone, defBounds)) {
-        defender.hp -= 1;
-        this.flashHit(defender);
-        
-        // Knockback
-        defender.setVelocityX(attacker.facing * 150);
-        defender.setVelocityY(-100);
-        
-        this.updateUI();
-        
+      if (distance < hitRadius + 20) {
+        // Hit!
+        defender.hp -= attacker.attackDamage;
+        createHitEffect(defCenterX, defCenterY);
+
+        // Knockback (✅ Easy to adjust knockback)
+        defender.velX = attacker.facing * 6;
+        defender.velY = -3;
+
+        updateUI();
+
         if (defender.hp <= 0) {
-          this.declareWinner(attacker);
+          endGame(attacker);
         }
+      } else {
+        // Miss - just show punch effect
+        createPunchEffect(attackX, attackY, attacker.facing);
       }
 
-      this.showPunchEffect(attacker);
-
-      this.time.delayedCall(400, () => {
+      // Cooldown
+      setTimeout(() => {
         if (attacker) attacker.cooldown = false;
-      });
+      }, attacker.cooldownTime);
     }
 
-    showPunchEffect(attacker) {
-      const punchX = attacker.x + (attacker.facing * 35);
-      const punch = this.add.circle(punchX, attacker.y, 15, 0xffff00, 0.6);
-      this.tweens.add({
-        targets: punch,
-        alpha: 0,
-        scale: 1.5,
-        duration: 200,
-        onComplete: () => punch.destroy()
-      });
+    // ============================================
+    // RENDERING
+    // ============================================
+    function drawBackground() {
+      // Stage background
+      const grad = ctx.createLinearGradient(0, 0, 0, game.stage.height);
+      grad.addColorStop(0, '#3a3a52');
+      grad.addColorStop(1, '#2d2d44');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, game.stage.width, game.stage.height);
+
+      // Arena border
+      ctx.strokeStyle = '#444466';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(2, 2, game.stage.width - 4, game.stage.height - 4);
     }
 
-    flashHit(target) {
-      target.setTint(0xff4444);
-      this.time.delayedCall(200, () => {
-        if (target) target.clearTint();
-      });
-    }
+    function drawGround() {
+      // Ground
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(0, game.stage.groundY, game.stage.width, game.stage.height - game.stage.groundY);
 
-    createUI() {
-      this.hpText1 = this.add.text(20, 20, 'PLAYER: ♥♥♥♥♥', { 
-        fontFamily: 'monospace', 
-        fontSize: 18, 
-        color: '#33aaff' 
-      }).setScrollFactor(0);
-      
-      this.hpText2 = this.add.text(this.scale.width - 160, 20, 'AI: ♥♥♥♥♥', { 
-        fontFamily: 'monospace', 
-        fontSize: 18, 
-        color: '#ff5566' 
-      }).setScrollFactor(0);
-    }
-
-    updateUI() {
-      const hearts1 = '♥'.repeat(Math.max(0, this.player.hp));
-      const hearts2 = '♥'.repeat(Math.max(0, this.ai.hp));
-      
-      this.hpText1.setText('PLAYER: ' + hearts1);
-      this.hpText2.setText('AI: ' + hearts2);
-    }
-
-    declareWinner(winner) {
-      this.gameOver = true;
-      this.physics.pause();
-      
-      if (this.aiTimer) {
-        this.aiTimer.remove();
+      // Ground grid/texture
+      ctx.strokeStyle = 'rgba(100, 100, 150, 0.2)';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < game.stage.width; i += 40) {
+        ctx.beginPath();
+        ctx.moveTo(i, game.stage.groundY);
+        ctx.lineTo(i, game.stage.height);
+        ctx.stroke();
       }
-      
-      const winnerName = winner === this.player ? 'You Win!' : 'AI Wins!';
-      const winnerColor = winner === this.player ? '#33aaff' : '#ff5566';
-      
-      this.add.text(
-        this.scale.width / 2, 
-        this.scale.height / 2 - 40, 
-        winnerName, 
-        {
-          fontFamily: 'monospace',
-          fontSize: 48,
-          color: winnerColor
-        }
-      ).setOrigin(0.5);
-      
-      this.add.text(
-        this.scale.width / 2, 
-        this.scale.height / 2 + 20, 
-        'K.O.', 
-        {
-          fontFamily: 'monospace',
-          fontSize: 32,
-          color: '#fff'
-        }
-      ).setOrigin(0.5);
-      
-      this.add.text(
-        this.scale.width / 2, 
-        this.scale.height / 2 + 70, 
-        'Click to Restart', 
-        {
-          fontFamily: 'monospace',
-          fontSize: 16,
-          color: '#ccc'
-        }
-      ).setOrigin(0.5);
-      
-      this.input.once('pointerdown', () => this.scene.restart());
+
+      // Ground line
+      ctx.strokeStyle = '#444466';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, game.stage.groundY);
+      ctx.lineTo(game.stage.width, game.stage.groundY);
+      ctx.stroke();
     }
-  }
-  </script>
-  <!-- REGION:SCENE_CLASS_END -->
 
-  <!-- REGION:CONFIG_START -->
-  <script>
-  const config = {
-    type: Phaser.AUTO,
-    width: 960,
-    height: 540,
-    backgroundColor: 0x202035,
-    physics: { 
-      default: 'arcade', 
-      arcade: { 
-        gravity: { y: 900 }, 
-        debug: false 
-      } 
-    },
-    scene: [FightScene]
-  };
-  </script>
-  <!-- REGION:CONFIG_END -->
+    function drawCharacter(character) {
+      ctx.save();
+      ctx.translate(character.x + character.width / 2, character.y + character.height / 2);
 
-  <!-- REGION:GAME_INIT_START -->
-  <script>
-  window.onload = () => {
-    const game = new Phaser.Game(config);
-  };
-  </script>
-  <!-- REGION:GAME_INIT_END -->
+      if (character.facing === -1) {
+        ctx.scale(-1, 1);
+      }
 
+      // Shadow
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+      ctx.beginPath();
+      ctx.ellipse(0, character.height / 2 + 8, character.width / 2, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Glow effect
+      ctx.fillStyle = character.color.replace(')', ', 0.15)').replace(/#\w+/, 'rgba(100, 200, 255');
+      ctx.beginPath();
+      ctx.arc(0, 0, character.width + 15, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Body with gradient
+      const bodyGrad = ctx.createLinearGradient(-character.width / 2, -character.height / 2, -character.width / 2, character.height / 2);
+      const brighter = character.color === '#33aaff' ? '#66ddff' : '#ff99aa';
+      bodyGrad.addColorStop(0, brighter);
+      bodyGrad.addColorStop(1, character.color);
+      ctx.fillStyle = bodyGrad;
+      ctx.fillRect(-character.width / 2, -character.height / 2, character.width, character.height);
+
+      // Body outline
+      ctx.strokeStyle = character.color === '#33aaff' ? '#1a5f7a' : '#8b0020';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(-character.width / 2, -character.height / 2, character.width, character.height);
+
+      // Head
+      ctx.fillStyle = brighter;
+      ctx.beginPath();
+      ctx.arc(0, -character.height / 2 + 12, 10, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Eyes
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(-4, -character.height / 2 + 8, 3, 0, Math.PI * 2);
+      ctx.arc(4, -character.height / 2 + 8, 3, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#000000';
+      ctx.beginPath();
+      ctx.arc(-4, -character.height / 2 + 8, 1.5, 0, Math.PI * 2);
+      ctx.arc(4, -character.height / 2 + 8, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Attack indicator (glow if attacking)
+      if (character.cooldown) {
+        ctx.strokeStyle = '#ffff00';
+        ctx.lineWidth = 2;
+        ctx.globalAlpha = 0.6;
+        ctx.strokeRect(-character.width / 2 - 5, -character.height / 2 - 5, character.width + 10, character.height + 10);
+        ctx.globalAlpha = 1;
+      }
+
+      ctx.restore();
+    }
+
+    // ============================================
+    // UI & GAME STATE
+    // ============================================
+    function updateUI() {
+      const playerHearts = '♥'.repeat(Math.max(0, game.player.hp));
+      const aiHearts = '♥'.repeat(Math.max(0, game.ai.hp));
+
+      document.getElementById('playerHP').textContent = 'PLAYER: ' + playerHearts;
+      document.getElementById('aiHP').textContent = 'AI: ' + aiHearts;
+    }
+
+    function endGame(winner) {
+      game.gameRunning = false;
+      game.gameOver = true;
+      game.winner = winner;
+
+      const overlay = document.createElement('div');
+      overlay.className = 'fight-over-screen';
+
+      const winnerName = winner === game.player ? 'YOU WIN!' : 'AI WINS!';
+      const winnerColor = winner === game.player ? '#33aaff' : '#ff5566';
+
+      overlay.innerHTML = `
+        <div class="winner-text" style="color: ${winnerColor};">${winnerName}</div>
+        <div class="ko-text">K.O.</div>
+        <div class="restart-hint">Click to Restart</div>
+      `;
+
+      overlay.addEventListener('click', () => {
+        location.reload();
+      });
+
+      document.querySelector('.game-container').appendChild(overlay);
+    }
+
+    // ============================================
+    // MAIN GAME LOOP
+    // ============================================
+    let aiUpdateCounter = 0;
+    const aiUpdateInterval = 6; // Update AI every 6 frames
+
+    function gameLoop() {
+      updatePlayer();
+
+      // Update AI less frequently for performance
+      if (aiUpdateCounter++ >= aiUpdateInterval) {
+        updateAI();
+        aiUpdateCounter = 0;
+      }
+
+      updateParticles();
+      updateUI();
+
+      // Draw
+      drawBackground();
+      drawGround();
+      drawCharacter(game.ai);
+      drawCharacter(game.player);
+      drawParticles();
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    // Start game
+    gameLoop();
+  </script>
 </body>
 </html>

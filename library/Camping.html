@@ -1,409 +1,833 @@
-
 <!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Camping Adventure - Phaser Game</title>
+  <title>Camping Adventure - Vanilla Canvas</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    html,body { margin:0; padding:0; background:#021; height:100%; }
-    .hint { position:absolute; right:12px; top:12px; color:#ddd; font-family:monospace; font-size:13px; background:rgba(0,0,0,0.25); padding:8px; border-radius:6px; z-index: 1000;}
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: linear-gradient(135deg, #021 0%, #0a3d0a 100%);
+      height: 100%;
+      font-family: 'Courier New', monospace;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden;
+    }
+
+    .game-container {
+      position: relative;
+      background: radial-gradient(ellipse at center, #0d5d0d 0%, #021 100%);
+      border-radius: 12px;
+      box-shadow:
+        0 0 60px rgba(100, 200, 100, 0.3),
+        inset 0 0 40px rgba(0, 0, 0, 0.5);
+      overflow: hidden;
+    }
+
+    canvas {
+      display: block;
+      background: linear-gradient(180deg, #1a4d1a 0%, #021 100%);
+    }
+
+    .ui-overlay {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      color: #fff;
+      font-size: 14px;
+      font-weight: bold;
+      text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      background: rgba(0, 0, 0, 0.4);
+      padding: 12px;
+      border: 2px solid #66cc66;
+      border-radius: 4px;
+    }
+
+    .inventory-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .wood-count {
+      color: #8b4513;
+      font-weight: bold;
+    }
+
+    .berry-count {
+      color: #ff6b9d;
+      font-weight: bold;
+    }
+
+    .progress-bar {
+      width: 120px;
+      height: 6px;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 3px;
+      overflow: hidden;
+      border: 1px solid #66cc66;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #8b4513, #ff6b9d);
+      width: 0%;
+      transition: width 0.3s;
+    }
+
+    .status-text {
+      position: absolute;
+      bottom: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #cccccc;
+      font-size: 12px;
+      background: rgba(0, 0, 0, 0.4);
+      padding: 8px 12px;
+      border-radius: 4px;
+      border: 1px solid rgba(102, 204, 102, 0.2);
+      text-align: center;
+      z-index: 10;
+    }
+
+    .hint {
+      position: absolute;
+      right: 12px;
+      top: 12px;
+      color: #888;
+      font-size: 12px;
+      background: rgba(0, 0, 0, 0.4);
+      padding: 8px 12px;
+      border-radius: 6px;
+      border: 1px solid rgba(102, 204, 102, 0.2);
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+      z-index: 10;
+    }
+
+    .victory-screen {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.9);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 100;
+      cursor: pointer;
+      backdrop-filter: blur(4px);
+    }
+
+    .victory-text {
+      color: #ffff00;
+      font-size: 56px;
+      font-weight: bold;
+      text-shadow: 0 0 20px rgba(255, 255, 0, 0.8);
+      margin-bottom: 20px;
+      animation: pulse 1s infinite;
+    }
+
+    .victory-emoji {
+      font-size: 48px;
+      margin-bottom: 30px;
+    }
+
+    .victory-stats {
+      color: #66cc66;
+      font-size: 18px;
+      text-align: center;
+      line-height: 1.8;
+      margin-bottom: 30px;
+    }
+
+    .restart-hint {
+      color: #888;
+      font-size: 14px;
+      margin-top: 20px;
+      animation: blink 1s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.1); }
+    }
+
+    @keyframes blink {
+      0%, 50%, 100% { opacity: 1; }
+      25%, 75% { opacity: 0.5; }
+    }
   </style>
 </head>
 <body>
-  <div class="hint">WASD to move • Collect wood (3) and berries (2) • Light the fire!</div>
+  <div class="game-container">
+    <canvas id="gameCanvas"></canvas>
+    <div class="ui-overlay">
+      <div class="inventory-item">
+        <span>🪵 Wood:</span>
+        <span class="wood-count" id="woodCount">0/3</span>
+      </div>
+      <div class="inventory-item">
+        <span>🫐 Berries:</span>
+        <span class="berry-count" id="berryCount">0/2</span>
+      </div>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressBar"></div>
+      </div>
+    </div>
+    <div class="status-text" id="statusText">Collect items to light the campfire</div>
+    <div class="hint">WASD to move • Collect items • Light the fire!</div>
+  </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
-
-  <!-- REGION:SCENE_CLASS_START -->
   <script>
-  class CampingScene extends Phaser.Scene {
-    constructor() { super('CampingScene'); }
-    
-    preload() {
-      this.generateTextures();
+    // ============================================
+    // CANVAS SETUP
+    // ============================================
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    function resizeCanvas() {
+      const maxWidth = Math.min(900, window.innerWidth - 20);
+      const maxHeight = Math.min(600, window.innerHeight - 20);
+      canvas.width = maxWidth;
+      canvas.height = maxHeight;
     }
-    
-    generateTextures() {
-      // Player texture
-      if (!this.textures.exists('player')) {
-        const g = this.add.graphics();
-        g.fillStyle(0x55aaff, 1);
-        g.fillCircle(16, 16, 14);
-        g.fillStyle(0x2255dd, 1);
-        g.fillCircle(12, 12, 6);
-        g.fillCircle(20, 12, 6);
-        g.generateTexture('player', 32, 32);
-        g.destroy();
-      }
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
 
-      // Wood texture
-      if (!this.textures.exists('wood')) {
-        const g = this.add.graphics();
-        g.fillStyle(0x8b4513, 1);
-        g.fillRect(0, 0, 20, 12);
-        g.generateTexture('wood', 20, 12);
-        g.destroy();
-      }
+    // ============================================
+    // GAME STATE (✅ EASY TO MODIFY)
+    // ============================================
+    const game = {
+      // Map/World
+      world: {
+        width: 0,
+        height: 0,
+        bgColor: '#1a4d1a',
+        treeDensity: 25        // ✅ Number of trees
+      },
 
-      // Berries texture
-      if (!this.textures.exists('berries')) {
-        const g = this.add.graphics();
-        g.fillStyle(0xff3366, 1);
-        g.fillCircle(10, 10, 8);
-        g.generateTexture('berries', 20, 20);
-        g.destroy();
-      }
+      // Player (✅ Adjust player stats)
+      player: {
+        x: 0,
+        y: 0,
+        radius: 12,
+        speed: 3,              // ✅ Movement speed
+        velX: 0,
+        velY: 0,
+        color: '#55aaff'       // ✅ Player color
+      },
 
-      // Campfire texture (unlit)
-      if (!this.textures.exists('campfire')) {
-        const g = this.add.graphics();
-        g.fillStyle(0x333333, 1);
-        g.fillCircle(20, 20, 18);
-        g.fillStyle(0x666666, 1);
-        g.fillCircle(20, 20, 12);
-        g.generateTexture('campfire', 40, 40);
-        g.destroy();
-      }
+      // Inventory & Collection (✅ Adjust requirements)
+      inventory: {
+        wood: 0,
+        berries: 0
+      },
 
-      // Campfire lit texture
-      if (!this.textures.exists('campfireLit')) {
-        const g = this.add.graphics();
-        g.fillStyle(0xff6600, 1);
-        g.fillCircle(20, 20, 18);
-        g.fillStyle(0xffaa00, 1);
-        g.fillCircle(20, 20, 12);
-        g.fillStyle(0xffff00, 1);
-        g.fillCircle(20, 15, 6);
-        g.generateTexture('campfireLit', 40, 40);
-        g.destroy();
-      }
-    }
-    
-    create() {
-      this.gameState = 'PLAYING'; // PLAYING, WON
-      this.inventory = { wood: 0, berries: 0 };
-      this.requiredWood = 3;
-      this.requiredBerries = 2;
+      collectibles: {
+        wood: [],
+        berries: []
+      },
 
-      this.createEnvironment();
-      this.createPlayer();
-      this.createCollectibles();
-      this.createCampfire();
-      this.createUI();
+      collectibleConfig: {
+        woodRequired: 3,       // ✅ Wood needed
+        berryRequired: 2,      // ✅ Berries needed
+        woodSpawn: 5,          // ✅ Number of wood items
+        berrySpawn: 4,         // ✅ Number of berry items
+        collectionRadius: 30   // ✅ Collection distance
+      },
 
-      this.keys = this.input.keyboard.addKeys('W,A,S,D');
+      // Campfire
+      campfire: {
+        x: 0,
+        y: 0,
+        radius: 25,
+        lit: false,
+        color: '#ff6600'       // ✅ Fire color
+      },
 
-      this.physics.add.overlap(this.player, this.collectibles, this.collectItem, null, this);
-      this.physics.add.overlap(this.player, this.campfire, this.tryLightFire, null, this);
-    }
+      // Game state
+      gameRunning: true,
+      gameWon: false,
 
-    update() {
-      if (this.gameState === 'PLAYING') {
-        this.updatePlayer();
-      }
-    }
+      // Input
+      keys: {},
 
-    createEnvironment() {
-      // Ground
-      this.add.rectangle(450, 300, 900, 600, 0x1a4d1a);
+      // Particles & Effects
+      particles: [],
+      floatingTexts: [],
 
-      // Trees (background decoration)
-      for (let i = 0; i < 25; i++) {
-        const x = Phaser.Math.Between(50, 850);
-        const y = Phaser.Math.Between(50, 550);
-        this.add.circle(x, y, Phaser.Math.Between(6, 12), 0x0d3d0d);
-      }
+      // Physics
+      friction: 0.92
+    };
 
-      // Tent
-      const tentG = this.add.graphics();
-      tentG.fillStyle(0xaa5533, 1);
-      tentG.fillTriangle(700, 500, 750, 420, 800, 500);
-      tentG.fillStyle(0x663333, 1);
-      tentG.fillTriangle(725, 460, 750, 420, 775, 460);
+    // Initialize world
+    game.world.width = canvas.width;
+    game.world.height = canvas.height;
 
-      // Instructions
-      this.add.text(450, 20, 'Collect 3 Wood + 2 Berries to Light the Fire!', {
-        fontFamily: 'monospace',
-        fontSize: 16,
-        color: '#ffff00',
-        align: 'center'
-      }).setOrigin(0.5);
-    }
+    // Initialize player
+    game.player.x = 100;
+    game.player.y = 100;
 
-    createPlayer() {
-      this.player = this.physics.add.sprite(100, 100, 'player');
-      this.player.setCollideWorldBounds(true);
-      this.player.setBounce(0.2);
-      this.player.speed = 200;
-    }
+    // Initialize campfire
+    game.campfire.x = canvas.width / 2;
+    game.campfire.y = canvas.height / 2;
 
-    createCollectibles() {
-      this.collectibles = this.physics.add.group();
-
-      // Spawn 5 wood items
-      for (let i = 0; i < 5; i++) {
+    // ============================================
+    // ITEM SPAWNING
+    // ============================================
+    function spawnCollectibles() {
+      // Spawn wood
+      for (let i = 0; i < game.collectibleConfig.woodSpawn; i++) {
         let x, y;
-        let overlapping = true;
-        
-        // Ensure items don't spawn on top of each other
-        while (overlapping) {
-          x = Phaser.Math.Between(100, 800);
-          y = Phaser.Math.Between(100, 500);
-          overlapping = false;
-          
-          this.collectibles.children.entries.forEach(item => {
-            const dist = Phaser.Math.Distance.Between(x, y, item.x, item.y);
-            if (dist < 80) overlapping = true;
+        let valid = false;
+
+        while (!valid) {
+          x = Math.random() * (canvas.width - 100) + 50;
+          y = Math.random() * (canvas.height - 100) + 50;
+
+          // Check distance from other items and campfire
+          valid = true;
+          const distToCampfire = Math.sqrt(
+            (x - game.campfire.x) ** 2 + (y - game.campfire.y) ** 2
+          );
+          if (distToCampfire < 100) valid = false;
+
+          game.collectibles.wood.forEach(w => {
+            const dist = Math.sqrt((x - w.x) ** 2 + (y - w.y) ** 2);
+            if (dist < 80) valid = false;
+          });
+
+          game.collectibles.berries.forEach(b => {
+            const dist = Math.sqrt((x - b.x) ** 2 + (y - b.y) ** 2);
+            if (dist < 80) valid = false;
           });
         }
 
-        const wood = this.collectibles.create(x, y, 'wood');
-        wood.itemType = 'wood';
-        wood.setTint(0x8b4513);
+        game.collectibles.wood.push({
+          x: x,
+          y: y,
+          width: 20,
+          height: 12,
+          collected: false,
+          color: '#8b4513',
+          rotation: Math.random() * Math.PI * 2
+        });
       }
 
-      // Spawn 4 berries
-      for (let i = 0; i < 4; i++) {
+      // Spawn berries
+      for (let i = 0; i < game.collectibleConfig.berrySpawn; i++) {
         let x, y;
-        let overlapping = true;
-        
-        while (overlapping) {
-          x = Phaser.Math.Between(100, 800);
-          y = Phaser.Math.Between(100, 500);
-          overlapping = false;
-          
-          this.collectibles.children.entries.forEach(item => {
-            const dist = Phaser.Math.Distance.Between(x, y, item.x, item.y);
-            if (dist < 80) overlapping = true;
+        let valid = false;
+
+        while (!valid) {
+          x = Math.random() * (canvas.width - 100) + 50;
+          y = Math.random() * (canvas.height - 100) + 50;
+
+          valid = true;
+          const distToCampfire = Math.sqrt(
+            (x - game.campfire.x) ** 2 + (y - game.campfire.y) ** 2
+          );
+          if (distToCampfire < 100) valid = false;
+
+          game.collectibles.wood.forEach(w => {
+            const dist = Math.sqrt((x - w.x) ** 2 + (y - w.y) ** 2);
+            if (dist < 80) valid = false;
+          });
+
+          game.collectibles.berries.forEach(b => {
+            const dist = Math.sqrt((x - b.x) ** 2 + (y - b.y) ** 2);
+            if (dist < 80) valid = false;
           });
         }
 
-        const berry = this.collectibles.create(x, y, 'berries');
-        berry.itemType = 'berries';
-        berry.setTint(0xff3366);
+        game.collectibles.berries.push({
+          x: x,
+          y: y,
+          radius: 8,
+          collected: false,
+          color: '#ff6b9d'
+        });
       }
     }
 
-    createCampfire() {
-      this.campfire = this.physics.add.sprite(450, 300, 'campfire');
-      this.campfire.lit = false;
-      this.campfire.setImmovable(true);
-      this.campfireLabel = this.add.text(450, 350, 'Campfire', {
-        fontFamily: 'monospace',
-        fontSize: 14,
-        color: '#888888',
-        align: 'center'
-      }).setOrigin(0.5);
-    }
+    spawnCollectibles();
 
-    updatePlayer() {
-      this.player.setVelocity(0);
-
-      if (this.keys.W.isDown) {
-        this.player.setVelocityY(-this.player.speed);
-      }
-      if (this.keys.S.isDown) {
-        this.player.setVelocityY(this.player.speed);
-      }
-      if (this.keys.A.isDown) {
-        this.player.setVelocityX(-this.player.speed);
-      }
-      if (this.keys.D.isDown) {
-        this.player.setVelocityX(this.player.speed);
+    // ============================================
+    // PARTICLES & EFFECTS
+    // ============================================
+    function createCollectionEffect(x, y, type) {
+      for (let i = 0; i < 8; i++) {
+        const angle = (Math.PI * 2 * i) / 8;
+        const speed = 2 + Math.random() * 2;
+        game.particles.push({
+          x: x,
+          y: y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: 1,
+          color: type === 'wood' ? '#8b4513' : '#ff6b9d',
+          size: 2 + Math.random() * 2
+        });
       }
     }
 
-    collectItem(player, item) {
-      const itemType = item.itemType;
-      this.inventory[itemType]++;
+    function createFireEffect(x, y) {
+      for (let i = 0; i < 12; i++) {
+        const angle = (Math.PI * 2 * i) / 12;
+        const speed = 2 + Math.random() * 3;
+        game.particles.push({
+          x: x,
+          y: y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed - 1,
+          life: 1,
+          color: '#ffaa00',
+          size: 3 + Math.random() * 3
+        });
+      }
+    }
 
-      // Visual feedback
-      this.tweens.add({
-        targets: item,
-        alpha: 0,
-        scale: 1.5,
-        duration: 200,
-        onComplete: () => item.destroy()
+    function addFloatingText(x, y, text, color) {
+      game.floatingTexts.push({
+        x: x,
+        y: y,
+        text: text,
+        color: color,
+        life: 1,
+        speed: 1
+      });
+    }
+
+    function updateParticles() {
+      game.particles.forEach((p, idx) => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.1;
+        p.life -= 0.02;
+
+        if (p.life <= 0) {
+          game.particles.splice(idx, 1);
+        }
       });
 
-      // Floating text
-      const floatingText = this.add.text(item.x, item.y - 20, '+1 ' + itemType, {
-        fontFamily: 'monospace',
-        fontSize: 16,
-        color: itemType === 'wood' ? '#8b4513' : '#ff3366',
-        fontStyle: 'bold'
-      });
+      game.floatingTexts.forEach((t, idx) => {
+        t.y -= t.speed;
+        t.life -= 0.02;
 
-      this.tweens.add({
-        targets: floatingText,
-        y: floatingText.y - 40,
-        alpha: 0,
-        duration: 500,
-        onComplete: () => floatingText.destroy()
+        if (t.life <= 0) {
+          game.floatingTexts.splice(idx, 1);
+        }
       });
-
-      this.updateUI();
     }
 
-    tryLightFire(player, fire) {
-      if (this.gameState !== 'PLAYING') return;
+    function drawParticles() {
+      game.particles.forEach(p => {
+        ctx.fillStyle = p.color.replace(')', `, ${p.life * 0.7})`).replace(/#\w+/, 'rgba(100, 100, 100');
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, Math.max(0.5, p.size), 0, Math.PI * 2);
+        ctx.fill();
+      });
 
-      const hasEnough = this.inventory.wood >= this.requiredWood && 
-                        this.inventory.berries >= this.requiredBerries;
+      game.floatingTexts.forEach(t => {
+        ctx.fillStyle = t.color.replace(')', `, ${t.life})`).replace(/#\w+/, 'rgba(255, 255, 255');
+        ctx.font = `bold 14px monospace`;
+        ctx.textAlign = 'center';
+        ctx.fillText(t.text, t.x, t.y);
+      });
+    }
 
-      if (!fire.lit && hasEnough) {
-        fire.lit = true;
-        fire.setTexture('campfireLit');
-        this.campfireLabel.setText('🔥 Fire Lit! 🔥');
-        this.campfireLabel.setColor('#ffaa00');
+    // ============================================
+    // INPUT HANDLING
+    // ============================================
+    document.addEventListener('keydown', (e) => {
+      game.keys[e.key.toUpperCase()] = true;
+    });
 
-        // Fire animation
-        this.tweens.add({
-          targets: fire,
-          scale: 1.2,
-          duration: 200,
-          yoyo: true,
-          repeat: 2
+    document.addEventListener('keyup', (e) => {
+      game.keys[e.key.toUpperCase()] = false;
+    });
+
+    // ============================================
+    // PLAYER UPDATE
+    // ============================================
+    function updatePlayer() {
+      if (!game.gameRunning) return;
+
+      const p = game.player;
+
+      // Reset velocity
+      p.velX = 0;
+      p.velY = 0;
+
+      // Movement (✅ Easy to adjust)
+      if (game.keys['W']) p.velY = -p.speed;
+      if (game.keys['S']) p.velY = p.speed;
+      if (game.keys['A']) p.velX = -p.speed;
+      if (game.keys['D']) p.velX = p.speed;
+
+      // Apply velocity
+      p.x += p.velX;
+      p.y += p.velY;
+
+      // Clamp to world bounds
+      p.x = Math.max(p.radius, Math.min(p.x, game.world.width - p.radius));
+      p.y = Math.max(p.radius, Math.min(p.y, game.world.height - p.radius));
+    }
+
+    // ============================================
+    // COLLISION & COLLECTION
+    // ============================================
+    function checkCollections() {
+      const p = game.player;
+      const radius = game.collectibleConfig.collectionRadius;
+
+      // Check wood collection
+      game.collectibles.wood.forEach((wood, idx) => {
+        if (wood.collected) return;
+
+        const dist = Math.sqrt(
+          (p.x - wood.x) ** 2 + (p.y - wood.y) ** 2
+        );
+
+        if (dist < radius) {
+          wood.collected = true;
+          game.inventory.wood += 1;
+          createCollectionEffect(wood.x, wood.y, 'wood');
+          addFloatingText(wood.x, wood.y - 20, '+1 Wood', '#8b4513');
+          updateUI();
+        }
+      });
+
+      // Check berry collection
+      game.collectibles.berries.forEach((berry, idx) => {
+        if (berry.collected) return;
+
+        const dist = Math.sqrt(
+          (p.x - berry.x) ** 2 + (p.y - berry.y) ** 2
+        );
+
+        if (dist < radius) {
+          berry.collected = true;
+          game.inventory.berries += 1;
+          createCollectionEffect(berry.x, berry.y, 'berries');
+          addFloatingText(berry.x, berry.y - 20, '+1 Berry', '#ff6b9d');
+          updateUI();
+        }
+      });
+
+      // Check campfire interaction
+      const distToCampfire = Math.sqrt(
+        (p.x - game.campfire.x) ** 2 + (p.y - game.campfire.y) ** 2
+      );
+
+      if (distToCampfire < radius + 20 && !game.campfire.lit) {
+        const hasEnough =
+          game.inventory.wood >= game.collectibleConfig.woodRequired &&
+          game.inventory.berries >= game.collectibleConfig.berryRequired;
+
+        if (hasEnough) {
+          game.campfire.lit = true;
+          createFireEffect(game.campfire.x, game.campfire.y);
+          createFireEffect(game.campfire.x, game.campfire.y - 20);
+          endGame();
+        }
+      }
+    }
+
+    // ============================================
+    // RENDERING
+    // ============================================
+    function drawBackground() {
+      const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      grad.addColorStop(0, '#1a4d1a');
+      grad.addColorStop(1, '#021');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Ground pattern
+      ctx.fillStyle = 'rgba(0, 100, 0, 0.1)';
+      for (let i = 0; i < canvas.width; i += 50) {
+        for (let j = 0; j < canvas.height; j += 50) {
+          if ((i / 50 + j / 50) % 2 === 0) {
+            ctx.fillRect(i, j, 50, 50);
+          }
+        }
+      }
+    }
+
+    function drawEnvironment() {
+      // Trees scattered around
+      ctx.fillStyle = 'rgba(13, 61, 13, 0.4)';
+      for (let i = 0; i < game.world.treeDensity; i++) {
+        const seed = i * 1234;
+        const x = (seed * 73) % canvas.width;
+        const y = (seed * 97) % canvas.height;
+        const size = ((seed * 13) % 8) + 6;
+
+        // Skip trees near important areas
+        const distToCampfire = Math.sqrt((x - game.campfire.x) ** 2 + (y - game.campfire.y) ** 2);
+        if (distToCampfire < 150) continue;
+
+        const distToPlayer = Math.sqrt((x - game.player.x) ** 2 + (y - game.player.y) ** 2);
+        if (distToPlayer < 100) continue;
+
+        ctx.beginPath();
+        ctx.arc(x, y, size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    function drawWoodItems() {
+      game.collectibles.wood.forEach(wood => {
+        if (wood.collected) return;
+
+        ctx.save();
+        ctx.translate(wood.x, wood.y);
+        ctx.rotate(wood.rotation);
+
+        // Wood shadow
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+        ctx.fillRect(-wood.width / 2, wood.height / 2 + 2, wood.width, 3);
+
+        // Wood piece
+        const grad = ctx.createLinearGradient(-wood.width / 2, 0, wood.width / 2, 0);
+        grad.addColorStop(0, '#a0522d');
+        grad.addColorStop(0.5, '#8b4513');
+        grad.addColorStop(1, '#704214');
+        ctx.fillStyle = grad;
+        ctx.fillRect(-wood.width / 2, -wood.height / 2, wood.width, wood.height);
+
+        // Wood texture lines
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+        ctx.lineWidth = 0.5;
+        for (let i = 0; i < 4; i++) {
+          ctx.beginPath();
+          ctx.moveTo(-wood.width / 2, -wood.height / 2 + i * 3);
+          ctx.lineTo(wood.width / 2, -wood.height / 2 + i * 3);
+          ctx.stroke();
+        }
+
+        ctx.restore();
+      });
+    }
+
+    function drawBerries() {
+      game.collectibles.berries.forEach(berry => {
+        if (berry.collected) return;
+
+        // Berry shadow
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+        ctx.beginPath();
+        ctx.ellipse(berry.x, berry.y + berry.radius + 3, berry.radius, 2, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Berry glow
+        ctx.fillStyle = 'rgba(255, 107, 157, 0.2)';
+        ctx.beginPath();
+        ctx.arc(berry.x, berry.y, berry.radius + 6, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Berry
+        const berryGrad = ctx.createRadialGradient(berry.x - 2, berry.y - 2, 0, berry.x, berry.y, berry.radius);
+        berryGrad.addColorStop(0, '#ff9bb9');
+        berryGrad.addColorStop(1, berry.color);
+        ctx.fillStyle = berryGrad;
+        ctx.beginPath();
+        ctx.arc(berry.x, berry.y, berry.radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Highlight
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.beginPath();
+        ctx.arc(berry.x - 2, berry.y - 2, 2, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    }
+
+    function drawCampfire() {
+      const cf = game.campfire;
+
+      // Shadow
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+      ctx.beginPath();
+      ctx.ellipse(cf.x, cf.y + cf.radius + 15, cf.radius * 1.2, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      if (!cf.lit) {
+        // Unlit campfire
+        ctx.fillStyle = '#333333';
+        ctx.beginPath();
+        ctx.arc(cf.x, cf.y, cf.radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#666666';
+        ctx.beginPath();
+        ctx.arc(cf.x, cf.y, cf.radius * 0.6, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Label
+        ctx.fillStyle = '#888888';
+        ctx.font = 'bold 14px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('Campfire', cf.x, cf.y + cf.radius + 30);
+      } else {
+        // Lit campfire with animation
+        const flicker = Math.sin(Date.now() * 0.01) * 0.2 + 0.8;
+
+        // Outer flame
+        ctx.fillStyle = `rgba(255, 102, 0, ${0.8 * flicker})`;
+        ctx.beginPath();
+        ctx.arc(cf.x, cf.y, cf.radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Middle flame
+        ctx.fillStyle = `rgba(255, 170, 0, ${0.9 * flicker})`;
+        ctx.beginPath();
+        ctx.arc(cf.x, cf.y, cf.radius * 0.7, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Inner flame
+        ctx.fillStyle = `rgba(255, 255, 0, ${flicker})`;
+        ctx.beginPath();
+        ctx.arc(cf.x, cf.y - 5, cf.radius * 0.4, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Label
+        ctx.fillStyle = '#ffaa00';
+        ctx.font = 'bold 14px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('🔥 Fire Lit! 🔥', cf.x, cf.y + cf.radius + 30);
+      }
+    }
+
+    function drawPlayer() {
+      const p = game.player;
+
+      // Shadow
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y + p.radius + 5, p.radius * 1.2, 3, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Body glow
+      ctx.fillStyle = 'rgba(85, 170, 255, 0.2)';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.radius + 8, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Body
+      const bodyGrad = ctx.createRadialGradient(p.x - 2, p.y - 2, 0, p.x, p.y, p.radius);
+      bodyGrad.addColorStop(0, '#77c4ff');
+      bodyGrad.addColorStop(1, p.color);
+      ctx.fillStyle = bodyGrad;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Eyes
+      ctx.fillStyle = '#2255dd';
+      ctx.beginPath();
+      ctx.arc(p.x - 4, p.y - 3, 3, 0, Math.PI * 2);
+      ctx.arc(p.x + 4, p.y - 3, 3, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Pupils
+      ctx.fillStyle = '#000000';
+      ctx.beginPath();
+      ctx.arc(p.x - 4, p.y - 3, 1.5, 0, Math.PI * 2);
+      ctx.arc(p.x + 4, p.y - 3, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Outline
+      ctx.strokeStyle = '#0066aa';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // ============================================
+    // UI & GAME STATE
+    // ============================================
+    function updateUI() {
+      const woodProgress = Math.min(game.inventory.wood, game.collectibleConfig.woodRequired);
+      const berryProgress = Math.min(game.inventory.berries, game.collectibleConfig.berryRequired);
+      const totalProgress = (woodProgress + berryProgress) / (game.collectibleConfig.woodRequired + game.collectibleConfig.berryRequired);
+
+      document.getElementById('woodCount').textContent = `${game.inventory.wood}/${game.collectibleConfig.woodRequired}`;
+      document.getElementById('berryCount').textContent = `${game.inventory.berries}/${game.collectibleConfig.berryRequired}`;
+      document.getElementById('progressBar').style.width = (totalProgress * 100) + '%';
+
+      const canLight = game.inventory.wood >= game.collectibleConfig.woodRequired &&
+                      game.inventory.berries >= game.collectibleConfig.berryRequired;
+
+      if (canLight) {
+        document.getElementById('statusText').textContent = '🔥 Go to the campfire to light the fire! 🔥';
+        document.getElementById('statusText').style.color = '#ffff00';
+      } else {
+        const woodNeeded = game.collectibleConfig.woodRequired - game.inventory.wood;
+        const berryNeeded = game.collectibleConfig.berryRequired - game.inventory.berries;
+        document.getElementById('statusText').textContent = `Need ${woodNeeded} more wood and ${berryNeeded} more berries`;
+      }
+    }
+
+    function endGame() {
+      game.gameRunning = false;
+      game.gameWon = true;
+
+      setTimeout(() => {
+        const overlay = document.createElement('div');
+        overlay.className = 'victory-screen';
+        overlay.innerHTML = `
+          <div class="victory-text">🎉 You Survived! 🎉</div>
+          <div class="victory-emoji">🔥 🏕️ 🔥</div>
+          <div class="victory-stats">
+            Items Used: ${game.collectibleConfig.woodRequired} Wood + ${game.collectibleConfig.berryRequired} Berries<br>
+            Remaining: ${game.inventory.wood - game.collectibleConfig.woodRequired} Wood, ${game.inventory.berries - game.collectibleConfig.berryRequired} Berries
+          </div>
+          <div class="restart-hint">Click to Play Again</div>
+        `;
+
+        overlay.addEventListener('click', () => {
+          location.reload();
         });
 
-        // Particles
-        for (let i = 0; i < 8; i++) {
-          const particle = this.add.circle(
-            fire.x + Phaser.Math.Between(-10, 10),
-            fire.y - 20,
-            3,
-            0xffaa00
-          );
-
-          this.tweens.add({
-            targets: particle,
-            y: particle.y - 50,
-            alpha: 0,
-            duration: 800,
-            onComplete: () => particle.destroy()
-          });
-        }
-
-        this.gameState = 'WON';
-        this.showVictory();
-      }
+        document.querySelector('.game-container').appendChild(overlay);
+      }, 500);
     }
 
-    showVictory() {
-      this.add.rectangle(450, 300, 900, 600, 0x000000, 0.8);
+    // ============================================
+    // MAIN GAME LOOP
+    // ============================================
+    function gameLoop() {
+      updatePlayer();
+      checkCollections();
+      updateParticles();
+      updateUI();
 
-      this.add.text(450, 200, 'You Survived!', {
-        fontFamily: 'monospace',
-        fontSize: 48,
-        color: '#ffff00',
-        fontStyle: 'bold',
-        align: 'center'
-      }).setOrigin(0.5);
+      // Draw
+      drawBackground();
+      drawEnvironment();
+      drawWoodItems();
+      drawBerries();
+      drawCampfire();
+      drawPlayer();
+      drawParticles();
 
-      this.add.text(450, 280, '🔥 🏕️ 🔥', {
-        fontSize: 48,
-        align: 'center'
-      }).setOrigin(0.5);
-
-      this.add.text(450, 360, `Items Used: ${this.requiredWood} Wood + ${this.requiredBerries} Berries`, {
-        fontFamily: 'monospace',
-        fontSize: 20,
-        color: '#cccccc',
-        align: 'center'
-      }).setOrigin(0.5);
-
-      this.add.text(450, 420, 'Remaining: ' + 
-                            (this.inventory.wood - this.requiredWood) + ' Wood, ' + 
-                            (this.inventory.berries - this.requiredBerries) + ' Berries', {
-        fontFamily: 'monospace',
-        fontSize: 16,
-        color: '#aaaaaa',
-        align: 'center'
-      }).setOrigin(0.5);
-
-      this.add.text(450, 500, 'Click to Play Again', {
-        fontFamily: 'monospace',
-        fontSize: 18,
-        color: '#888888',
-        align: 'center'
-      }).setOrigin(0.5).setInteractive();
-
-      this.input.once('pointerdown', () => this.scene.restart());
+      requestAnimationFrame(gameLoop);
     }
 
-    createUI() {
-      this.woodText = this.add.text(16, 50, 'Wood: 0/' + this.requiredWood, {
-        fontFamily: 'monospace',
-        fontSize: 18,
-        color: '#8b4513',
-        fontStyle: 'bold',
-        backgroundColor: '#000',
-        padding: { x: 8, y: 4 }
-      });
-
-      this.berriesText = this.add.text(16, 85, 'Berries: 0/' + this.requiredBerries, {
-        fontFamily: 'monospace',
-        fontSize: 18,
-        color: '#ff3366',
-        fontStyle: 'bold',
-        backgroundColor: '#000',
-        padding: { x: 8, y: 4 }
-      });
-
-      this.statusText = this.add.text(450, 570, 'Collect items to light the campfire', {
-        fontFamily: 'monospace',
-        fontSize: 14,
-        color: '#cccccc',
-        align: 'center'
-      }).setOrigin(0.5);
-    }
-
-    updateUI() {
-      this.woodText.setText('Wood: ' + this.inventory.wood + '/' + this.requiredWood);
-      this.berriesText.setText('Berries: ' + this.inventory.berries + '/' + this.requiredBerries);
-
-      const woodProgress = Math.min(this.inventory.wood, this.requiredWood);
-      const berryProgress = Math.min(this.inventory.berries, this.requiredBerries);
-      const totalProgress = woodProgress + berryProgress;
-
-      if (totalProgress === this.requiredWood + this.requiredBerries) {
-        this.statusText.setText('Ready to light the fire! Go to the campfire!');
-        this.statusText.setColor('#ffff00');
-      } else {
-        this.statusText.setText(`Need ${this.requiredWood - woodProgress} more wood and ${this.requiredBerries - berryProgress} more berries`);
-      }
-    }
-  }
+    // Start game
+    gameLoop();
   </script>
-  <!-- REGION:SCENE_CLASS_END -->
-
-  <!-- REGION:CONFIG_START -->
-  <script>
-  const config = {
-    type: Phaser.AUTO,
-    width: 900,
-    height: 600,
-    backgroundColor: 0x003300,
-    physics: {
-      default: 'arcade',
-      arcade: {
-        gravity: { y: 0 },
-        debug: false
-      }
-    },
-    scene: [CampingScene]
-  };
-  </script>
-  <!-- REGION:CONFIG_END -->
-
-  <!-- REGION:GAME_INIT_START -->
-  <script>
-  window.onload = () => {
-    const game = new Phaser.Game(config);
-  };
-  </script>
-  <!-- REGION:GAME_INIT_END -->
-
 </body>
 </html>

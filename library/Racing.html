@@ -2,271 +2,602 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Phaser Racing Game Base</title>
+  <title>Endless Racing - Dodge Obstacles</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    html, body { margin:0; padding:0; background:#111; height:100%; }
-    .hint { position: absolute; right: 12px; top: 12px; color:#ddd; font-family: monospace; font-size:13px; background: rgba(0,0,0,0.25); padding:8px; border-radius:6px; z-index: 1000; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);
+      height: 100%;
+      font-family: 'Courier New', monospace;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden;
+    }
+
+    .game-container {
+      position: relative;
+      background: radial-gradient(ellipse at center, #1a1a2e 0%, #0a0a0a 100%);
+      border-radius: 12px;
+      box-shadow:
+        0 0 60px rgba(100, 200, 255, 0.3),
+        inset 0 0 40px rgba(0, 0, 0, 0.5);
+      overflow: hidden;
+    }
+
+    canvas {
+      display: block;
+      background: linear-gradient(180deg, #0f1419 0%, #050709 100%);
+    }
+
+    .ui-overlay {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      color: #64c8ff;
+      font-size: 16px;
+      font-weight: bold;
+      text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .ui-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(0, 0, 0, 0.3);
+      padding: 8px 12px;
+      border-radius: 4px;
+      border-left: 3px solid #64c8ff;
+    }
+
+    .ui-item span {
+      font-weight: bold;
+      color: #ffff00;
+    }
+
+    .multiplier {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      color: #ff6b6b;
+      font-size: 14px;
+      font-weight: bold;
+      text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+      z-index: 10;
+      background: rgba(0, 0, 0, 0.3);
+      padding: 8px 12px;
+      border-radius: 4px;
+      border: 2px solid #ff6b6b;
+    }
+
+    .hint {
+      position: absolute;
+      left: 12px;
+      bottom: 12px;
+      color: #888;
+      font-size: 12px;
+      background: rgba(0, 0, 0, 0.4);
+      padding: 8px 12px;
+      border-radius: 6px;
+      border: 1px solid rgba(100, 200, 255, 0.2);
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+      z-index: 10;
+    }
+
+    .game-over-screen {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.9);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 100;
+      cursor: pointer;
+      backdrop-filter: blur(4px);
+    }
+
+    .game-over-text {
+      color: #ff6b6b;
+      font-size: 56px;
+      font-weight: bold;
+      text-shadow: 0 0 20px rgba(255, 107, 107, 0.8);
+      margin-bottom: 30px;
+      animation: shake 0.5s;
+    }
+
+    .game-stats {
+      color: #64c8ff;
+      font-size: 22px;
+      text-align: center;
+      line-height: 2;
+      margin-bottom: 30px;
+    }
+
+    .restart-hint {
+      color: #888;
+      font-size: 14px;
+      margin-top: 20px;
+      animation: blink 1s infinite;
+    }
+
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-10px); }
+      75% { transform: translateX(10px); }
+    }
+
+    @keyframes blink {
+      0%, 50%, 100% { opacity: 1; }
+      25%, 75% { opacity: 0.5; }
+    }
   </style>
 </head>
 <body>
-  <div class="hint">↑/↓ accelerate/brake • ←/→ steer</div>
-
-  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+  <div class="game-container">
+    <canvas id="gameCanvas"></canvas>
+    <div class="ui-overlay">
+      <div class="ui-item">Distance: <span id="distance">0</span>m</div>
+      <div class="ui-item">Speed: <span id="speed">1.0</span>x</div>
+    </div>
+    <div class="multiplier" id="multiplier">Score: <span id="score">0</span></div>
+    <div class="hint">A/D or ← → to dodge</div>
+  </div>
 
   <script>
-  /*********************
-   * BASE SCENE TEMPLATE
-   *********************/
-  class BaseRacingScene extends Phaser.Scene {
-    constructor(key = 'BaseRacingScene') {
-      super(key);
-      this.config = {
-        trackCenter: { x: 450, y: 300 },
-        laps: 3
-      };
-    }
+    // ============================================
+    // CANVAS SETUP
+    // ============================================
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
 
-    preload() {
-      this.loadAssets();
+    function resizeCanvas() {
+      const maxWidth = Math.min(900, window.innerWidth - 20);
+      const maxHeight = Math.min(600, window.innerHeight - 20);
+      canvas.width = maxWidth;
+      canvas.height = maxHeight;
     }
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
 
-    loadAssets() {
-      // Can be overridden to load car/track images or sounds
-      this.generateDefaultCarTexture();
-    }
+    // ============================================
+    // GAME STATE (✅ EASY TO MODIFY)
+    // ============================================
+    const game = {
+      // Road/Path configuration (✅ Adjust road width)
+      road: {
+        x: 0,
+        y: 0,
+        width: 120,           // ✅ Road width
+        laneWidth: 0,
+        color: '#444444',
+        lineColor: '#ffff00',
+        scrollY: 0,
+        scrollSpeed: 3        // ✅ Base scroll speed
+      },
 
-    generateDefaultCarTexture() {
-      if (!this.textures.exists('defaultCar')) {
-        const g = this.add.graphics();
-        g.fillStyle(0xff5555, 1);
-        g.fillRect(-10, -20, 20, 40);
-        g.fillStyle(0xffffff, 1);
-        g.fillRect(-6, -18, 12, 10);
-        g.generateTexture('defaultCar', 20, 40);
-        g.destroy();
+      // Player car (✅ Adjust car stats)
+      player: {
+        x: 0,
+        y: 0,
+        width: 28,
+        height: 45,
+        lane: 1,              // ✅ 0=left, 1=middle, 2=right
+        lanePositions: [],    // Will be calculated
+        speed: 0,
+        targetSpeed: 0,
+        moveSpeed: 2,         // ✅ How fast player moves between lanes
+        color: '#47c6ff'      // ✅ Change car color
+      },
+
+      // Obstacles (✅ Adjust difficulty)
+      obstacles: [],
+      obstacleConfig: {
+        spawnRate: 1200,      // ✅ Milliseconds between spawns (lower = more obstacles)
+        width: 28,
+        height: 45,
+        speed: 0,             // Relative to road scroll
+        color: '#ff6b6b'      // ✅ Obstacle color
+      },
+
+      // Game difficulty scaling (✅ Adjust difficulty curve)
+      difficulty: {
+        baseSpeed: 3,         // ✅ Base scroll speed
+        speedIncrease: 0.001, // ✅ Speed increase per frame (affects difficulty)
+        maxSpeed: 8,          // ✅ Maximum speed
+        currentSpeed: 3
+      },
+
+      // Score & state
+      score: 0,
+      distance: 0,
+      gameRunning: true,
+      gameOver: false,
+      distancePerFrame: 0,
+
+      // Input
+      keys: {},
+
+      // Particles
+      particles: [],
+
+      // Spawn tracking
+      lastSpawnTime: 0
+    };
+
+    // Initialize lane positions
+    game.road.x = canvas.width / 2 - game.road.width / 2;
+    game.road.y = 0;
+    game.road.laneWidth = game.road.width / 3;
+
+    const laneOffsets = [-1, 0, 1];
+    game.player.lanePositions = laneOffsets.map(offset =>
+      game.road.x + game.road.width / 2 + offset * game.road.laneWidth - game.player.width / 2
+    );
+
+    game.player.x = game.player.lanePositions[game.player.lane];
+    game.player.y = canvas.height - 100;
+
+    // ============================================
+    // PARTICLES (Visual effects)
+    // ============================================
+    function createCollisionEffect(x, y) {
+      for (let i = 0; i < 20; i++) {
+        const angle = (Math.PI * 2 * i) / 20;
+        const speed = 3 + Math.random() * 4;
+        game.particles.push({
+          x: x,
+          y: y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: 1,
+          color: '#ff6b6b',
+          size: 3 + Math.random() * 3
+        });
       }
     }
 
-    create() {
-      this.createTrack();        // Track drawing or loading
-      this.createPlayer();       // Player car setup
-      this.createCheckpoints();  // Lap checkpoints
-      this.createUI();           // Speed/time/lap text
+    function updateParticles() {
+      game.particles.forEach((p, idx) => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.15; // gravity
+        p.life -= 0.02;
 
-      this.cursors = this.input.keyboard.createCursorKeys();
-      this.resetRace();
-    }
-
-    resetRace() {
-      this.lap = 1;
-      this.totalLaps = this.config.laps;
-      this.lapStart = this.time.now;
-      this.lapTimes = [];
-      this.checkpointsPassed = new Set();
-      this.canFinishLap = false;
-    }
-
-    update() {
-      this.updatePlayer();
-      this.handleOffTrack();
-      this.checkCheckpoints();
-    }
-
-    /***************************
-     * TRACK AND ENVIRONMENT
-     ***************************/
-    createTrack() {
-      // Default circular track — override this in subclasses
-      const { x: cx, y: cy } = this.config.trackCenter;
-      const inner = 180, outer = 240;
-      const g = this.add.graphics();
-
-      g.fillStyle(0x2d5016, 1).fillCircle(cx, cy, outer + 40);
-      g.fillStyle(0x3a3a3a, 1)
-        .beginPath()
-        .arc(cx, cy, outer, 0, Math.PI * 2)
-        .arc(cx, cy, inner, 0, Math.PI * 2, true)
-        .closePath().fillPath();
-
-      // Save for boundary checks
-      this.trackInnerRadius = inner;
-      this.trackOuterRadius = outer;
-
-      // Start/finish line
-      g.lineStyle(4, 0xffffff, 1);
-      g.lineBetween(cx + inner, cy, cx + outer, cy);
-    }
-
-    createCheckpoints() {
-      this.checkpoints = this.physics.add.staticGroup();
-      const { x: cx, y: cy } = this.config.trackCenter;
-      const mid = (this.trackInnerRadius + this.trackOuterRadius) / 2;
-      const width = this.trackOuterRadius - this.trackInnerRadius;
-      const angles = [0, Math.PI/2, Math.PI, 3*Math.PI/2];
-
-      angles.forEach((angle, i) => {
-        const x = cx + Math.cos(angle) * mid;
-        const y = cy + Math.sin(angle) * mid;
-        const rect = this.add.rectangle(x, y, width, 30, 0x00ff00, 0);
-        this.physics.add.existing(rect, true);
-        rect.checkpointId = i;
-        rect.setRotation(angle);
-        this.checkpoints.add(rect);
-      });
-    }
-
-    /***************************
-     * PLAYER LOGIC
-     ***************************/
-    createPlayer() {
-      // Default player car — override for different car textures
-      const { x: cx, y: cy } = this.config.trackCenter;
-      const r = (this.trackInnerRadius + this.trackOuterRadius) / 2;
-      this.player = this.physics.add.sprite(cx + r, cy, 'defaultCar');
-
-      this.player.speed = 0;
-      this.player.maxSpeed = 250;
-      this.player.accel = 4;
-      this.player.decel = 2;
-      this.player.rotation = -Math.PI / 2;
-    }
-
-    updatePlayer() {
-      const p = this.player;
-      const cursors = this.cursors;
-
-      // Accel/brake
-      if (cursors.up.isDown) p.speed = Math.min(p.speed + p.accel, p.maxSpeed);
-      else if (cursors.down.isDown) p.speed = Math.max(p.speed - p.accel * 1.5, -p.maxSpeed / 2);
-      else p.speed *= 0.97;
-
-      // Steering
-      const turnRate = 0.05 * Math.max(0.3, Math.abs(p.speed) / p.maxSpeed);
-      if (Math.abs(p.speed) > 10) {
-        if (cursors.left.isDown) p.rotation -= turnRate;
-        if (cursors.right.isDown) p.rotation += turnRate;
-      }
-
-      // Apply motion
-      p.setVelocity(Math.cos(p.rotation) * p.speed, Math.sin(p.rotation) * p.speed);
-    }
-
-    handleOffTrack() {
-      const p = this.player;
-      const { x: cx, y: cy } = this.config.trackCenter;
-      const dist = Phaser.Math.Distance.Between(p.x, p.y, cx, cy);
-      if (dist < this.trackInnerRadius || dist > this.trackOuterRadius) {
-        p.speed *= 0.85;
-        p.setTint(0xff9999);
-      } else p.clearTint();
-    }
-
-    /***************************
-     * CHECKPOINTS & LAPS
-     ***************************/
-    checkCheckpoints() {
-      this.physics.overlap(this.player, this.checkpoints, (_, cp) => {
-        const id = cp.checkpointId;
-        if (this.checkpointsPassed.size === 0 && id === 0) {
-          this.checkpointsPassed.add(id);
-        } else if (this.checkpointsPassed.size === 3 && id === 0) {
-          this.completeLap();
-          this.checkpointsPassed.clear();
-        } else if (!this.checkpointsPassed.has(id)) {
-          this.checkpointsPassed.add(id);
+        if (p.life <= 0 || p.y > canvas.height) {
+          game.particles.splice(idx, 1);
         }
       });
     }
 
-    completeLap() {
-      const lapTime = (this.time.now - this.lapStart) / 1000;
-      this.lapTimes.push(lapTime);
-      this.lap++;
-      this.lapText.setText(`Lap: ${this.lap}/${this.totalLaps}`);
-      this.lapStart = this.time.now;
-
-      if (this.lap > this.totalLaps) this.finishRace();
+    function drawParticles() {
+      game.particles.forEach(p => {
+        ctx.fillStyle = p.color.replace(')', `, ${p.life * 0.7})`).replace('#ff6b6b', 'rgba(255, 107, 107');
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, Math.max(0.5, p.size), 0, Math.PI * 2);
+        ctx.fill();
+      });
     }
 
-    finishRace() {
-      this.physics.pause();
-      const total = this.lapTimes.reduce((a,b)=>a+b,0).toFixed(2);
-      const best = Math.min(...this.lapTimes).toFixed(2);
-      const txt = this.add.text(this.scale.width/2, this.scale.height/2, 
-        `🏁 Race Complete!\nTotal: ${total}s\nBest Lap: ${best}s\nClick to Restart`,
-        { fontFamily:'monospace', fontSize:24, color:'#fff', align:'center' }
-      ).setOrigin(0.5);
-      this.input.once('pointerdown', ()=>this.scene.restart());
+    // ============================================
+    // INPUT HANDLING
+    // ============================================
+    document.addEventListener('keydown', (e) => {
+      game.keys[e.key.toLowerCase()] = true;
+      game.keys[e.key] = true;
+    });
+    document.addEventListener('keyup', (e) => {
+      game.keys[e.key.toLowerCase()] = false;
+      game.keys[e.key] = false;
+    });
+
+    // ============================================
+    // GAME MECHANICS
+    // ============================================
+    function updateGame() {
+      if (!game.gameRunning) return;
+
+      // Update difficulty (✅ Speed ramps up)
+      game.difficulty.currentSpeed = Math.min(
+        game.difficulty.baseSpeed + game.distance * game.difficulty.speedIncrease,
+        game.difficulty.maxSpeed
+      );
+
+      // Scroll road
+      game.road.scrollY += game.difficulty.currentSpeed;
+      if (game.road.scrollY > canvas.height) {
+        game.road.scrollY -= canvas.height;
+      }
+
+      // Player lane movement (✅ Easy to control response)
+      const keys = game.keys;
+      if (keys['a'] || keys['arrowleft']) {
+        if (game.player.lane > 0) game.player.lane -= 1;
+        keys['a'] = false;
+        keys['arrowleft'] = false;
+      }
+      if (keys['d'] || keys['arrowright']) {
+        if (game.player.lane < 2) game.player.lane += 1;
+        keys['d'] = false;
+        keys['arrowright'] = false;
+      }
+
+      // Smooth player movement to lane
+      const targetX = game.player.lanePositions[game.player.lane];
+      game.player.x += (targetX - game.player.x) * 0.15;
+
+      // Spawn obstacles
+      spawnObstacles();
+
+      // Update obstacles
+      updateObstacles();
+
+      // Check collisions
+      checkCollisions();
+
+      // Update score/distance
+      game.distancePerFrame = game.difficulty.currentSpeed * 0.1;
+      game.distance += game.distancePerFrame;
+      game.score = Math.floor(game.distance * 10); // 1 meter = 10 points
+
+      updateParticles();
     }
 
-    /***************************
-     * UI ELEMENTS
-     ***************************/
-    createUI() {
-      this.speedText = this.add.text(16,16,'Speed: 0',{fontFamily:'monospace',fontSize:18,color:'#fff'});
-      this.lapText = this.add.text(16,40,`Lap: 1/${this.config.laps}`,{fontFamily:'monospace',fontSize:18,color:'#ffff00'});
-      this.timeText = this.add.text(16,64,'Time: 0.00s',{fontFamily:'monospace',fontSize:18,color:'#fff'});
-      
-      this.time.addEvent({
-        delay:100,
-        loop:true,
-        callback:()=>{
-          this.speedText.setText('Speed: ' + Math.abs(Math.round(this.player.speed)));
-          this.timeText.setText('Time: ' + ((this.time.now - this.lapStart)/1000).toFixed(2)+'s');
+    function spawnObstacles() {
+      const now = Date.now();
+      if (now - game.lastSpawnTime < game.obstacleConfig.spawnRate) return;
+
+      game.lastSpawnTime = now;
+
+      // Randomly pick a lane
+      const lane = Math.floor(Math.random() * 3);
+      const obstacleX = game.player.lanePositions[lane];
+
+      game.obstacles.push({
+        x: obstacleX,
+        y: -game.obstacleConfig.height,
+        width: game.obstacleConfig.width,
+        height: game.obstacleConfig.height,
+        lane: lane,
+        color: game.obstacleConfig.color
+      });
+    }
+
+    function updateObstacles() {
+      game.obstacles.forEach((obs, idx) => {
+        obs.y += game.difficulty.currentSpeed;
+
+        // Remove off-screen obstacles
+        if (obs.y > canvas.height) {
+          game.obstacles.splice(idx, 1);
         }
       });
     }
-  }
 
-  /*********************
-   * CUSTOM GAME EXAMPLE
-   *********************/
-  class CityRaceScene extends BaseRacingScene {
-    constructor() { super('CityRaceScene'); }
+    function checkCollisions() {
+      const p = game.player;
 
-    createTrack() {
-      // Example custom track (different style)
-      const g = this.add.graphics();
-      const { x: cx, y: cy } = this.config.trackCenter;
-      const inner = 150, outer = 280;
-
-      g.fillStyle(0x444444, 1);
-      g.beginPath();
-      g.arc(cx, cy, outer, 0, Math.PI * 2);
-      g.arc(cx, cy, inner, 0, Math.PI * 2, true);
-      g.closePath();
-      g.fillPath();
-
-      g.lineStyle(4, 0xffffff, 1);
-      g.lineBetween(cx + inner, cy, cx + outer, cy);
-
-      this.trackInnerRadius = inner;
-      this.trackOuterRadius = outer;
+      game.obstacles.forEach((obs, idx) => {
+        // Simple AABB collision
+        if (
+          p.x < obs.x + obs.width &&
+          p.x + p.width > obs.x &&
+          p.y < obs.y + obs.height &&
+          p.y + p.height > obs.y
+        ) {
+          // Collision!
+          createCollisionEffect(p.x + p.width / 2, p.y + p.height / 2);
+          endGame();
+        }
+      });
     }
 
-    createPlayer() {
-      const { x: cx, y: cy } = this.config.trackCenter;
-      const r = (this.trackInnerRadius + this.trackOuterRadius) / 2;
-      this.player = this.physics.add.sprite(cx + r, cy, 'defaultCar');
-      this.player.setScale(1.2);
-      this.player.maxSpeed = 300;
+    // ============================================
+    // RENDERING
+    // ============================================
+    function drawBackground() {
+      const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      grad.addColorStop(0, '#0f1419');
+      grad.addColorStop(1, '#050709');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Side terrain
+      ctx.fillStyle = '#1a3a1a';
+      ctx.fillRect(0, 0, game.road.x, canvas.height);
+      ctx.fillRect(game.road.x + game.road.width, 0, game.road.x, canvas.height);
     }
-  }
 
-  /*********************
-   * GAME CONFIG
-   *********************/
-  const config = {
-    type: Phaser.AUTO,
-    width: 900,
-    height: 600,
-    backgroundColor: 0x0a0a0a,
-    physics: { default: 'arcade', arcade: { debug: false } },
-    scene: [CityRaceScene]
-  };
+    function drawRoad() {
+      const { x, y, width, scrollY, color, lineColor } = game.road;
 
-  window.onload = () => new Phaser.Game(config);
+      // Road base
+      ctx.fillStyle = color;
+      ctx.fillRect(x, 0, width, canvas.height);
+
+      // Road edge lines (left)
+      ctx.strokeStyle = lineColor;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, canvas.height);
+      ctx.stroke();
+
+      // Road edge lines (right)
+      ctx.beginPath();
+      ctx.moveTo(x + width, 0);
+      ctx.lineTo(x + width, canvas.height);
+      ctx.stroke();
+
+      // Lane dividers with scroll effect
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([15, 15]);
+
+      const laneX1 = x + width / 3;
+      const laneX2 = x + (2 * width) / 3;
+
+      // Animated dashes
+      for (let i = -1; i < 3; i++) {
+        const offset = (scrollY % 30) - 30;
+        ctx.beginPath();
+        ctx.moveTo(laneX1, i * 30 + offset);
+        ctx.lineTo(laneX1, (i + 1) * 30 + offset);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(laneX2, i * 30 + offset);
+        ctx.lineTo(laneX2, (i + 1) * 30 + offset);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+    }
+
+    function drawPlayer() {
+      const p = game.player;
+
+      ctx.save();
+      ctx.translate(p.x + p.width / 2, p.y + p.height / 2);
+
+      // Shadow
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+      ctx.beginPath();
+      ctx.ellipse(0, 25, p.width / 2, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.translate(-(p.width / 2), -(p.height / 2));
+
+      // Glow
+      ctx.fillStyle = 'rgba(71, 198, 255, 0.2)';
+      ctx.beginPath();
+      ctx.arc(p.width / 2, p.height / 2, p.width + 10, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Car body
+      const bodyGrad = ctx.createLinearGradient(0, 0, 0, p.height);
+      bodyGrad.addColorStop(0, '#7fd9ff');
+      bodyGrad.addColorStop(1, p.color);
+      ctx.fillStyle = bodyGrad;
+      ctx.fillRect(0, 0, p.width, p.height);
+
+      // Car outline
+      ctx.strokeStyle = '#1a5f7a';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(0, 0, p.width, p.height);
+
+      // Windows
+      ctx.fillStyle = 'rgba(100, 180, 255, 0.6)';
+      ctx.fillRect(2, 4, p.width - 4, 8);
+      ctx.fillRect(2, p.height - 12, p.width - 4, 8);
+
+      // Headlights
+      ctx.fillStyle = '#ffff99';
+      ctx.fillRect(4, 2, 4, 4);
+      ctx.fillRect(p.width - 8, 2, 4, 4);
+
+      ctx.restore();
+    }
+
+    function drawObstacles() {
+      game.obstacles.forEach(obs => {
+        ctx.save();
+        ctx.translate(obs.x + obs.width / 2, obs.y + obs.height / 2);
+
+        // Shadow
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+        ctx.beginPath();
+        ctx.ellipse(0, 25, obs.width / 2, 4, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.translate(-(obs.width / 2), -(obs.height / 2));
+
+        // Glow
+        ctx.fillStyle = 'rgba(255, 107, 107, 0.25)';
+        ctx.beginPath();
+        ctx.arc(obs.width / 2, obs.height / 2, obs.width + 10, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Obstacle body
+        const obsGrad = ctx.createLinearGradient(0, 0, 0, obs.height);
+        obsGrad.addColorStop(0, '#ff9999');
+        obsGrad.addColorStop(1, obs.color);
+        ctx.fillStyle = obsGrad;
+        ctx.fillRect(0, 0, obs.width, obs.height);
+
+        // Obstacle outline
+        ctx.strokeStyle = '#8b0000';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(0, 0, obs.width, obs.height);
+
+        // Windows
+        ctx.fillStyle = 'rgba(100, 100, 100, 0.6)';
+        ctx.fillRect(2, 4, obs.width - 4, 8);
+        ctx.fillRect(2, obs.height - 12, obs.width - 4, 8);
+
+        ctx.restore();
+      });
+    }
+
+    // ============================================
+    // GAME STATE & UI
+    // ============================================
+    function updateUI() {
+      document.getElementById('distance').textContent = Math.floor(game.distance);
+      document.getElementById('speed').textContent = game.difficulty.currentSpeed.toFixed(1);
+      document.getElementById('score').textContent = game.score;
+    }
+
+    function endGame() {
+      game.gameRunning = false;
+      game.gameOver = true;
+
+      const overlay = document.createElement('div');
+      overlay.className = 'game-over-screen';
+      overlay.innerHTML = `
+        <div class="game-over-text">💥 CRASHED! 💥</div>
+        <div class="game-stats">
+          Distance: <span style="color: #ffff00;">${Math.floor(game.distance)}m</span><br>
+          Score: <span style="color: #ffff00;">${game.score}</span><br>
+          Speed: <span style="color: #ffff00;">${game.difficulty.currentSpeed.toFixed(1)}x</span>
+        </div>
+        <div class="restart-hint">Click to Restart</div>
+      `;
+
+      overlay.addEventListener('click', () => {
+        location.reload();
+      });
+
+      document.querySelector('.game-container').appendChild(overlay);
+    }
+
+    // ============================================
+    // MAIN GAME LOOP
+    // ============================================
+    function gameLoop() {
+      updateGame();
+      updateUI();
+
+      // Draw
+      drawBackground();
+      drawRoad();
+      drawObstacles();
+      drawPlayer();
+      drawParticles();
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    // Start game
+    gameLoop();
   </script>
 </body>
 </html>
