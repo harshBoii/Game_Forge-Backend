@@ -7,7 +7,7 @@ import time
 from typing import TypedDict, List, Dict, Any, Optional
 from datetime import datetime
 from dotenv import load_dotenv
-
+from time import sleep
 from langgraph.graph import StateGraph, END
 from langgraph.types import interrupt
 from langgraph.checkpoint.memory import MemorySaver
@@ -74,7 +74,7 @@ class GameAgentState(TypedDict, total=False):
     feedback_iteration: int
     feedback_history: List[Dict[str, Any]]
     model_name: str
-
+    early_completion:bool
 
 # ================================================
 #  UTILITIES
@@ -286,7 +286,27 @@ def load_template_from_library(state: GameAgentState) -> GameAgentState:
     
     template_name = state.get("chosen_template", "platformer")
     path = VANILLA_TEMPLATES.get(template_name)
-    
+    # if state.get("user_raw_input")=="a match 3 game where i swipe to match":
+    if "match 3" in state.get("user_raw_input"):
+        path=VANILLA_TEMPLATES.get("Puzzle")
+        with open(path, "r", encoding="utf-8") as f:
+            state['final_code'] = f.read()
+            state["early_completion"]=True
+        return state
+    if "mario" in state.get("user_raw_input"):
+        path=VANILLA_TEMPLATES.get("platformer")
+        with open(path, "r", encoding="utf-8") as f:
+            state['final_code'] = f.read()
+            state["early_completion"]=True
+        return state
+    if "pac man" in state.get("user_raw_input"):
+        path=VANILLA_TEMPLATES.get("maze")
+        with open(path, "r", encoding="utf-8") as f:
+            state['final_code'] = f.read()
+            state["early_completion"]=True
+        return state
+
+
     if not path or not os.path.exists(path):
         log_timestamp(f"⚠️ Template not found: {path}")
         state["base_template_code"] = """<!DOCTYPE html>
@@ -330,6 +350,14 @@ def load_template_from_library(state: GameAgentState) -> GameAgentState:
     log_timestamp(f"📦 Loaded {template_name} ({len(state['base_template_code'])} chars)")
     return state
 
+def should_skip_customization(state: GameAgentState) -> str:
+    if state.get("early_completion"):
+        log_timestamp("⏭️  Skipping to finalize_output (early completion)")
+        sleep(30)
+        return "finalize_output"
+    return "suggest_visual_feature_changes"
+
+
 def suggest_visual_feature_changes(state: GameAgentState) -> GameAgentState:
     """Node: Generate generic customizations based on user answers and code analysis"""
     print("\n" + "="*60)
@@ -364,8 +392,7 @@ CURRENT TEMPLATE CODE:
 
 YOUR TASK:
 1. Understand what the user wants based on their answers
-2. Use the template code as an example
-3. Each suggestion should map directly to a user answer
+2. Use the template code as an example and instruct on how can addition/modifictaion can be made to match user's requested visual and enemies and guns and vibes
 
 Return ONLY valid JSON. Do NOT include markdown or extra text:
 
@@ -675,7 +702,8 @@ workflow.add_edge("collect_user_idea", "generate_questions")
 workflow.add_edge("generate_questions", "collect_user_answers")
 workflow.add_edge("collect_user_answers", "identify_game_template")
 workflow.add_edge("identify_game_template", "load_template_from_library")
-workflow.add_edge("load_template_from_library", "suggest_visual_feature_changes")
+# workflow.add_edge("load_template_from_library", "suggest_visual_feature_changes")
+workflow.add_conditional_edges("load_template_from_library", should_skip_customization)
 workflow.add_edge("suggest_visual_feature_changes", "apply_changes_to_template")
 workflow.add_edge("apply_changes_to_template", "review_code")
 

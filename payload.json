@@ -1,0 +1,11 @@
+{
+  "session_id": "4f642432-e2b4-4a78-a2c9-4684ebfe4de1",
+  "answers": [
+    {"question": "What game type do you want?", "answer": "Puzzle"},
+    {"question": "What should the player look like?", "answer": "Ninja"},
+    {"question": "What mechanics do you want?", "answer": "Dodge & Fire"},
+    {"question": "What gun/weapon type?", "answer": "Machine Gun"},
+    {"question": "What should enemies look like?", "answer": "Robots"},
+    {"question": "What's the background vibe?", "answer": "Cyberpunk City"}
+  ]
+}
