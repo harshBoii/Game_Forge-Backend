@@ -22,11 +22,11 @@ MAX_FEEDBACK_ITERATIONS = 2
 
 MODEL_ROUTING = {
     "simple": "gpt-4o-mini",
-    "complex": "gpt-5",
+    "complex": "gpt-5-mini",
 }
 
 TEMPERATURE_SETTINGS = {
-    "creative": 0.8,
+    "creative": 0.3,
     "code": 0.2,
     "review": 0.1,
     "analysis": 0.5
@@ -39,6 +39,9 @@ VANILLA_TEMPLATES = {
     "racing": "library/Racing.html",
     "fighting": "library/Fighting.html",
     "camping": "library/Camping.html",
+    "sports":"library/Football.html",
+    "Puzzle":"library/Puzzle.html",
+    "Maze":"library/Maze.html"
 }
 
 
@@ -163,53 +166,43 @@ def collect_user_idea(state: GameAgentState) -> GameAgentState:
 
 
 def generate_questions(state: GameAgentState) -> GameAgentState:
-    """Node: Generate 3-4 clarifying questions"""
+    """Node: Generate 4 clarifying questions without LLM"""
     print("\n" + "="*60)
     print("NODE: GENERATE QUESTIONS")
     print("="*60)
     
-    user_text = state.get("user_raw_input", "")
+    state["questions"] = [
+        {
+            "question": "What game type do you want?",
+            "options": ["space_shooter","arena_shooter","platformer","racing","fighting","camping","sports","Puzzle","Maze"]
+
+        },
+        {
+            "question": "What should the player look like?",
+            "options": ["Soldier", "Ninja", "Robot", "Knight"]
+        },
+        {
+            "question": "What mechanics do you want?",
+            "options": ["Dodge only", "Fire only", "Dodge & Fire", "Melee Combat"]
+        },
+        {
+            "question": "What gun/weapon type?",
+            "options": ["Laser", "Rocket", "Machine Gun", "Shotgun"]
+        },
+        {
+            "question": "What should enemies look like?",
+            "options": ["Zombies", "Aliens", "Robots", "Demons"]
+        },
+        {
+            "question": "What's the background vibe?",
+            "options": ["Dark Forest", "Cyberpunk City", "Haunted Castle", "Wasteland"]
+        }
+    ]
     
-    prompt = f"""
-You are a game designer creating clarifying questions.
-
-User's game idea: "{user_text}"
-
-Generate 3-4 multiple-choice questions to understand:
-1. Game genre/type
-2. Gun he wants or moves he wants
-3. Vibe
-4. Enemy Type
-
-Make questions concise with 2-3 options each.
-
-Respond as JSON array:
-[
-  {{"question": "What's the game style?", "options": ["Action", "Puzzle"]}},
-  ...
-]
-"""
-    
-    out = llm_invoke_text(
-        prompt,
-        state,
-        task_type="simple",
-        max_tokens=600
-    )
-    
-    try:
-        parsed = safe_json_parse(out)
-        state["questions"] = parsed if isinstance(parsed, list) else parsed.get("questions", [])
-        log_timestamp(f"✅ Generated {len(state['questions'])} questions")
-    except Exception as e:
-        log_timestamp(f"⚠️ Using fallback: {e}")
-        state["questions"] = [
-            {"question": "Game genre?", "options": ["Shooter", "Platformer", "Fighting"]},
-            {"question": "Visual style?", "options": ["Retro", "Modern", "Cartoon"]},
-            {"question": "Difficulty?", "options": ["Easy", "Medium", "Hard"]},
-        ]
+    log_timestamp(f"✅ Generated {len(state['questions'])} questions")
     
     return state
+
 
 
 def collect_user_answers(state: GameAgentState) -> GameAgentState:
@@ -337,48 +330,91 @@ def load_template_from_library(state: GameAgentState) -> GameAgentState:
     log_timestamp(f"📦 Loaded {template_name} ({len(state['base_template_code'])} chars)")
     return state
 
-
 def suggest_visual_feature_changes(state: GameAgentState) -> GameAgentState:
-    """Node: Plan customizations"""
+    """Node: Generate generic customizations based on user answers and code analysis"""
     print("\n" + "="*60)
     print("NODE: SUGGEST VISUAL FEATURE CHANGES")
     print("="*60)
     
     user_text = state.get("user_raw_input", "")
+    questions = state.get("questions", [])
     answers = state.get("answers", [])
     template = state.get("chosen_template", "")
-    base_code = state.get("base_template_code", "")[:2000]
+    base_code = state.get("base_template_code", "")
+    
+    # Format Q&A pairs for context
+    qa_context = ""
+    for i, (q, a) in enumerate(zip(questions, answers)):
+        question_text = q.get("question", "")
+        qa_context += f"Q{i+1}: {question_text}\nA{i+1}: {a}\n\n"
     
     prompt = f"""
-Plan customizations for a vanilla Canvas game.
+You are a game code customization expert. Analyze the user's game preferences and suggest SPECIFIC code modifications.
 
-Template: {template}
-User idea: {user_text}
-Answers: {json.dumps(answers)}
+TEMPLATE TYPE: {template}
 
-Code snippet:
+USER'S ORIGINAL IDEA:
+{user_text}
+
+USER'S DESIGN CHOICES:
+{qa_context}
+
+CURRENT TEMPLATE CODE:
 {base_code}
 
-Suggest modifications in JSON format:
+YOUR TASK:
+1. Understand what the user wants based on their answers
+2. Find the relevant sections in the code that need to be modified
+3. Suggest EXACT code changes (find and replace)
+4. Each suggestion should map directly to a user answer
+
+Return ONLY valid JSON. Do NOT include markdown or extra text:
+
 {{
   "Changes": [
-    {{"what": "Change player color", "from": "old_value", "to": "new_value"}},
-    ...
+    {{
+      "answer": "User said X",
+      "what": "Modify Y to match X",
+      "where": "Function name or code section where change is needed",
+      "how": "Specific instructions on what to change",
+    }}
   ]
 }}
 
-Keep changes SIMPLE and SMALL - only modify game state values.
+IMPORTANT:
+- Each change must directly address a user answer
+- Focus on: colors, strings, numbers, properties (NOT logic changes)
+- Be specific about line numbers or function names when visible
 """
     
-    out = llm_invoke_text(prompt, state, task_type="creative", max_tokens=1000)
+    out = llm_invoke_text(prompt, state, task_type="creative")
     
     try:
-        mods = safe_json_parse(out)
-        state["game_modifications"] = mods
-        log_timestamp(f"✅ Suggested {len(mods.get('Changes', []))} changes")
+        parsed = safe_json_parse(out)
+        
+        # Handle both list and dict responses
+        if isinstance(parsed, list):
+            state["game_modifications"] = {"Changes": parsed}
+        elif isinstance(parsed, dict):
+            if "Changes" in parsed:
+                state["game_modifications"] = parsed
+            else:
+                state["game_modifications"] = {"Changes": [parsed] if parsed else []}
+        else:
+            raise ValueError("Unexpected response format")
+        
+        changes_count = len(state["game_modifications"].get("Changes", []))
+        log_timestamp(f"✅ Generated {changes_count} customizations based on user answers")
+        
+        # Log each change for debugging
+        for i, change in enumerate(state["game_modifications"].get("Changes", []), 1):
+            print(f"  [{i}] {change.get('what', 'N/A')} in {change.get('section', 'N/A')}")
+            
     except Exception as e:
         log_timestamp(f"⚠️ Fallback: {e}")
-        state["game_modifications"] = {"Changes": []}
+        state["game_modifications"] = {
+            "Changes": []
+        }
     
     return state
 
@@ -387,9 +423,10 @@ def apply_changes_to_template(state: GameAgentState) -> GameAgentState:
     """Node: Apply changes to template"""
     print("\n" + "="*60)
     print("NODE: APPLY CHANGES TO TEMPLATE")
+    changes = state.get("game_modifications", {})
+    print(f"Changes are: {(changes.get('Changes', []))}")
     print("="*60)
     
-    changes = state.get("game_modifications", {})
     base_code = state.get("base_template_code", "")
     
     prompt = f"""
@@ -403,13 +440,12 @@ Current code:
 
 TASK:
 - Modify ONLY the game object values
-- Keep all functions and structure intact
 - Return COMPLETE valid HTML
 - Start with <!DOCTYPE html>
 - No markdown formatting
 """
     
-    out = llm_invoke_text(prompt, state, task_type="code", max_tokens=6000)
+    out = llm_invoke_text(prompt, state, task_type="code",)
 
     html = re.sub(r"^```", "", out.strip(), flags=re.MULTILINE)
     html = re.sub(r"\s*```$", "", html, flags=re.MULTILINE)
@@ -451,7 +487,7 @@ Return JSON ONLY:
 }}
 """
     
-    out = llm_invoke_text(prompt, state, task_type="review", max_tokens=600)
+    out = llm_invoke_text(prompt, state, task_type="review")
     
     try:
         review = safe_json_parse(out)
@@ -508,7 +544,7 @@ Return ONLY fixed HTML starting with <!DOCTYPE html>
 No markdown.
 """
     
-    out = llm_invoke_text(prompt, state, task_type="code", max_tokens=6000)
+    out = llm_invoke_text(prompt, state, task_type="code")
     
     fixed = re.sub(r"^```", "", out.strip(), flags=re.MULTILINE)
     fixed = re.sub(r"\s*```$", "", fixed, flags=re.MULTILINE)
@@ -585,14 +621,14 @@ def apply_feedback_to_code(state: GameAgentState) -> GameAgentState:
 User feedback: "{feedback}"
 
 Current game code (first 1500 chars):
-{code[:1500]}
+{code}
 
 Apply the feedback to the game code.
 Return ONLY modified HTML starting with <!DOCTYPE html>
 No markdown.
 """
     
-    out = llm_invoke_text(prompt, state, task_type="code", max_tokens=6000)
+    out = llm_invoke_text(prompt, state, task_type="code")
     
     fixed = re.sub(r"^```", "", out.strip(), flags=re.MULTILINE)
     fixed = re.sub(r"\s*```$", "", fixed, flags=re.MULTILINE)

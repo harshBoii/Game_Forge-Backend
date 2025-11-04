@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Cricket 07 Game</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            background: #0a4d0a;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+        
+        #gameContainer {
+            position: relative;
+            width: 1000px;
+            height: 700px;
+        }
+        
+        canvas {
+            display: block;
+            background: linear-gradient(180deg, #2d9d2d 0%, #1a6b1a 100%);
+            border: 3px solid #fff;
+            width: 100%;
+            height: 100%;
+        }
+        
+        #scoreBoard {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            color: #ffff00;
+            padding: 15px;
+            border-radius: 5px;
+            font-size: 13px;
+            font-weight: bold;
+            width: 220px;
+            line-height: 1.6;
+        }
+        
+        #matchStatus {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            color: #00ff00;
+            padding: 15px;
+            border-radius: 5px;
+            font-size: 12px;
+            width: 200px;
+            text-align: center;
+        }
+        
+        #controls {
+            position: absolute;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: #00ff88;
+            padding: 12px 20px;
+            border-radius: 5px;
+            font-size: 12px;
+            text-align: center;
+        }
+        
+        .shot-button {
+            display: inline-block;
+            margin: 0 5px;
+            padding: 5px 10px;
+            background: #444;
+            border: 1px solid #00ff88;
+            color: #00ff88;
+            border-radius: 3px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        
+        .shot-button:hover {
+            background: #00ff88;
+            color: #000;
+        }
+        
+        #gameOver {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.95);
+            color: #ffff00;
+            padding: 40px;
+            border-radius: 10px;
+            text-align: center;
+            display: none;
+            z-index: 1000;
+            font-size: 18px;
+            min-width: 300px;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+        
+        <div id="scoreBoard">
+            <div style="border-bottom: 1px solid #ffff00; margin-bottom: 8px; padding-bottom: 8px;">
+                🏏 CRICKET 07
+            </div>
+            <div>Runs: <span id="runs">0</span></div>
+            <div>Wickets: <span id="wickets">0</span>/10</div>
+            <div>Overs: <span id="overs">0</span>.<span id="balls">0</span>/20</div>
+            <div>Strike Rate: <span id="strikeRate">0</span></div>
+            <div style="margin-top: 8px; border-top: 1px solid #ffff00; padding-top: 8px;">
+                Batsman: <span id="batsmanName">Virat</span></div>
+            <div>Score: <span id="batsmanScore">0</span> (<span id="batsmanBalls">0</span>)</div>
+        </div>
+        
+        <div id="matchStatus">
+            <div id="ballInfo" style="font-size: 14px; margin-bottom: 10px;">Ready to bat</div>
+            <div id="shotInfo" style="font-size: 11px; color: #00ff88;">Press Space to bowl</div>
+        </div>
+        
+        <div id="controls">
+            <div style="margin-bottom: 8px;">
+                ← → to position | <span class="shot-button">D</span> Drive | <span class="shot-button">P</span> Pull
+            </div>
+            <div><span class="shot-button">C</span> Cut | <span class="shot-button">F</span> Flick | <span class="shot-button">Space</span> Defend</div>
+        </div>
+        
+        <div id="gameOver"></div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        canvas.width = 1000;
+        canvas.height = 700;
+
+        // =====================================================
+        // GAME STATE
+        // =====================================================
+        const game = {
+            batsman: {
+                x: 450,
+                y: 550,
+                width: 25,
+                height: 60,
+                speed: 7,
+                velocityX: 0,
+                color: '#ffff00',
+                name: 'Virat',
+                runs: 0,
+                ballsFaced: 0,
+                stance: 'ready' // ready, playing
+            },
+
+            bowler: {
+                x: 450,
+                y: 100,
+                width: 20,
+                height: 50,
+                color: '#00ff00',
+                angle: 0,
+                runUp: 0
+            },
+
+            ball: {
+                x: 450,
+                y: 100,
+                radius: 6,
+                velocityX: 0,
+                velocityY: 0,
+                inPlay: false,
+                color: '#ff0000',
+                speed: 0,
+                spin: 0
+            },
+
+            fielders: [
+                { x: 200, y: 250, name: 'Slip', color: '#00ffff' },
+                { x: 800, y: 250, name: 'Gully', color: '#00ffff' },
+                { x: 150, y: 450, name: 'Mid-wicket', color: '#00ffff' },
+                { x: 850, y: 450, name: 'Cover', color: '#00ffff' },
+                { x: 400, y: 200, name: 'Mid-on', color: '#00ffff' },
+                { x: 600, y: 200, name: 'Mid-off', color: '#00ffff' }
+            ],
+
+            stats: {
+                runs: 0,
+                wickets: 0,
+                overs: 0,
+                balls: 0,
+                totalOvers: 20,
+                totalWickets: 10
+            },
+
+            shotType: null,
+            ballTiming: 0,
+            gameRunning: true,
+            
+            colors: {
+                grass: '#2d9d2d',
+                pitch: '#8b7355',
+                line: '#ffffff'
+            }
+        };
+
+        // =====================================================
+        // INPUT HANDLING
+        // =====================================================
+        const keys = {};
+        let shotLock = false;
+
+        document.addEventListener('keydown', (e) => {
+            keys[e.key.toUpperCase()] = true;
+            
+            const key = e.key.toUpperCase();
+            
+            // Shot selection
+            if (game.ball.inPlay && !shotLock) {
+                if (key === 'D') executeShot('drive');
+                if (key === 'P') executeShot('pull');
+                if (key === 'C') executeShot('cut');
+                if (key === 'F') executeShot('flick');
+                if (key === ' ') executeShot('defend');
+                shotLock = true;
+            }
+            
+            // Bowling
+            if (!game.ball.inPlay && key === ' ') {
+                bowlBall();
+                e.preventDefault();
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            keys[e.key.toUpperCase()] = false;
+            if (e.key === ' ') shotLock = false;
+        });
+
+        // =====================================================
+        // GAME LOGIC
+        // =====================================================
+        function bowlBall() {
+            const ball = game.ball;
+            const bowl = game.bowler;
+            
+            ball.x = bowl.x;
+            ball.y = bowl.y;
+            
+            // Realistic bowling with some randomness based on difficulty
+            const bowlDeviation = (Math.random() - 0.5) * 60;
+            ball.velocityX = bowlDeviation / 40;
+            ball.velocityY = 8;
+            ball.speed = 8;
+            ball.spin = Math.random() * 2 - 1;
+            
+            ball.inPlay = true;
+            game.batsman.ballsFaced++;
+            
+            updateUI();
+            document.getElementById('ballInfo').textContent = `Ball ${game.stats.balls + 1} bowled`;
+        }
+
+        function executeShot(shotType) {
+            const ball = game.ball;
+            const bat = game.batsman;
+            
+            if (!ball.inPlay) return;
+            
+            // Hit detection zone
+            const hitZone = 80;
+            const distX = Math.abs(ball.x - bat.x);
+            const distY = Math.abs(ball.y - (bat.y - 50));
+            
+            if (distX < hitZone && distY < 100) {
+                let runs = 0;
+                let direction = 0;
+                let power = 0;
+                
+                // Shot mechanics
+                switch(shotType) {
+                    case 'drive':
+                        runs = Math.random() > 0.3 ? 4 : (Math.random() > 0.5 ? 2 : 1);
+                        direction = 0;
+                        power = 12;
+                        break;
+                    case 'pull':
+                        runs = Math.random() > 0.4 ? 6 : (Math.random() > 0.5 ? 4 : 1);
+                        direction = Math.PI / 2;
+                        power = 14;
+                        break;
+                    case 'cut':
+                        runs = Math.random() > 0.3 ? 4 : (Math.random() > 0.6 ? 1 : 0);
+                        direction = Math.PI / 3;
+                        power = 13;
+                        break;
+                    case 'flick':
+                        runs = Math.random() > 0.4 ? 2 : (Math.random() > 0.5 ? 1 : 0);
+                        direction = -Math.PI / 4;
+                        power = 10;
+                        break;
+                    case 'defend':
+                        runs = 0;
+                        power = 3;
+                        break;
+                }
+                
+                // Check if caught
+                const caughtChance = shotType === 'pull' || shotType === 'cut' ? 0.15 : 0.05;
+                if (Math.random() < caughtChance) {
+                    game.wickets++;
+                    ball.inPlay = false;
+                    document.getElementById('shotInfo').textContent = '✗ CAUGHT OUT!';
+                    updateStats();
+                    return;
+                }
+                
+                // Update runs
+                game.stats.runs += runs;
+                game.batsman.runs += runs;
+                
+                ball.velocityY = -power;
+                ball.velocityX = Math.cos(direction) * power * 0.5;
+                ball.inPlay = false;
+                
+                document.getElementById('shotInfo').textContent = `✓ ${shotType.toUpperCase()} - ${runs} runs!`;
+                
+                updateStats();
+            } else {
+                // Missed shot
+                if (Math.random() > 0.7) {
+                    game.wickets++;
+                    ball.inPlay = false;
+                    document.getElementById('shotInfo').textContent = '✗ BOWLED!';
+                } else {
+                    ball.inPlay = false;
+                    document.getElementById('shotInfo').textContent = 'Missed ball - dot';
+                }
+                updateStats();
+            }
+        }
+
+        function updateBatsman() {
+            const bat = game.batsman;
+            
+            bat.velocityX = 0;
+            
+            if (keys['ARROWLEFT'] || keys['A']) bat.velocityX = -bat.speed;
+            if (keys['ARROWRIGHT'] || keys['D'] && game.shotType !== 'drive') bat.velocityX = bat.speed;
+            
+            bat.x += bat.velocityX;
+            
+            if (bat.x < 100) bat.x = 100;
+            if (bat.x > canvas.width - 100) bat.x = canvas.width - 100;
+        }
+
+        function updateBowler() {
+            const bowl = game.bowler;
+            bowl.angle = Math.sin(Date.now() / 500) * 0.3;
+        }
+
+        function updateBall() {
+            const ball = game.ball;
+            
+            if (!ball.inPlay) return;
+            
+            ball.velocityY += 0.5; // Gravity
+            ball.x += ball.velocityX;
+            ball.y += ball.velocityY;
+            
+            // Add spin effect
+            ball.velocityX += ball.spin * 0.02;
+            
+            // Bounce off ground
+            if (ball.y > 580) {
+                ball.inPlay = false;
+                document.getElementById('ballInfo').textContent = 'Ball completed';
+            }
+            
+            // Caught by fielder
+            game.fielders.forEach(fielder => {
+                const dist = Math.hypot(ball.x - fielder.x, ball.y - fielder.y);
+                if (dist < 40 && ball.inPlay) {
+                    game.wickets++;
+                    ball.inPlay = false;
+                    document.getElementById('shotInfo').textContent = `✗ CAUGHT by ${fielder.name}!`;
+                    updateStats();
+                }
+            });
+        }
+
+        function updateStats() {
+            game.stats.balls++;
+            if (game.stats.balls === 6) {
+                game.stats.overs++;
+                game.stats.balls = 0;
+            }
+            
+            if (game.stats.overs >= game.stats.totalOvers || game.stats.wickets >= game.stats.totalWickets) {
+                endGame();
+            }
+            
+            document.getElementById('runs').textContent = game.stats.runs;
+            document.getElementById('wickets').textContent = game.stats.wickets;
+            document.getElementById('overs').textContent = game.stats.overs;
+            document.getElementById('balls').textContent = game.stats.balls;
+            document.getElementById('batsmanScore').textContent = game.batsman.runs;
+            document.getElementById('batsmanBalls').textContent = game.batsman.ballsFaced;
+            
+            const strikeRate = game.batsman.ballsFaced > 0 
+                ? ((game.batsman.runs / game.batsman.ballsFaced) * 100).toFixed(1)
+                : 0;
+            document.getElementById('strikeRate').textContent = strikeRate;
+        }
+
+        function endGame() {
+            game.gameRunning = false;
+            const gameOverDiv = document.getElementById('gameOver');
+            gameOverDiv.innerHTML = `
+                <div style="font-size: 28px; margin-bottom: 20px; color: #ffff00;">🏏 INNINGS OVER 🏏</div>
+                <div style="font-size: 20px; margin: 10px 0;">Total Runs: <span style="color: #00ff88;">${game.stats.runs}</span></div>
+                <div style="font-size: 18px; margin: 10px 0;">Overs: ${game.stats.overs}.${game.stats.balls}/20</div>
+                <div style="font-size: 18px; margin: 10px 0;">Wickets Down: ${game.stats.wickets}</div>
+                <div style="font-size: 16px; margin-top: 20px; color: #00ff88;">Refresh to play again</div>
+            `;
+            gameOverDiv.style.display = 'block';
+        }
+
+        // =====================================================
+        // RENDERING
+        // =====================================================
+        function drawPitch() {
+            // Grass
+            ctx.fillStyle = game.colors.grass;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Pitch
+            ctx.fillStyle = game.colors.pitch;
+            ctx.fillRect(300, 300, 400, 200);
+            
+            // Crease lines
+            ctx.strokeStyle = game.colors.line;
+            ctx.lineWidth = 2;
+            
+            // Bowling crease
+            ctx.beginPath();
+            ctx.moveTo(400, 300);
+            ctx.lineTo(600, 300);
+            ctx.stroke();
+            
+            // Popping crease
+            ctx.beginPath();
+            ctx.moveTo(400, 500);
+            ctx.lineTo(600, 500);
+            ctx.stroke();
+            
+            // Stumps (wickets)
+            const drawStumps = (x, y) => {
+                ctx.fillStyle = '#d4af37';
+                ctx.fillRect(x - 2, y - 20, 1, 20);
+                ctx.fillRect(x + 1, y - 20, 1, 20);
+                ctx.fillRect(x + 4, y - 20, 1, 20);
+                ctx.fillRect(x - 3, y, 10, 2);
+            };
+            drawStumps(500, 300);
+            drawStumps(500, 500);
+        }
+
+        function drawBatsman() {
+            const bat = game.batsman;
+            ctx.fillStyle = bat.color;
+            ctx.fillRect(bat.x - 8, bat.y, 16, 60);
+            ctx.fillStyle = '#ffdbac';
+            ctx.beginPath();
+            ctx.arc(bat.x, bat.y - 15, 10, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function drawBowler() {
+            const bowl = game.bowler;
+            ctx.fillStyle = bowl.color;
+            ctx.save();
+            ctx.translate(bowl.x, bowl.y);
+            ctx.rotate(bowl.angle);
+            ctx.fillRect(-10, 0, 20, 50);
+            ctx.restore();
+            ctx.fillStyle = '#ffdbac';
+            ctx.beginPath();
+            ctx.arc(bowl.x, bowl.y - 15, 10, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function drawBall() {
+            const ball = game.ball;
+            if (!ball.inPlay) return;
+            
+            ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, 15, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.fillStyle = ball.color;
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function drawFielders() {
+            game.fielders.forEach(fielder => {
+                ctx.fillStyle = fielder.color;
+                ctx.fillRect(fielder.x - 8, fielder.y, 16, 35);
+                ctx.fillStyle = '#ffdbac';
+                ctx.beginPath();
+                ctx.arc(fielder.x, fielder.y - 10, 8, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        }
+
+        // =====================================================
+        // GAME LOOP
+        // =====================================================
+        function gameLoop() {
+            if (game.gameRunning) {
+                updateBatsman();
+                updateBowler();
+                updateBall();
+            }
+
+            drawPitch();
+            drawBatsman();
+            drawBowler();
+            drawBall();
+            drawFielders();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        console.log('🏏 Cricket 07 Game Started!');
+        requestAnimationFrame(gameLoop);
+    </script>
+</body>
+</html>

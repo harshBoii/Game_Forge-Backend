@@ -1,381 +1,522 @@
-
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>Puzzle / Matching - Phaser Template</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    html,body { margin:0; padding:0; background:#111; height:100%; }
-    .hint { position: absolute; right: 12px; top: 12px; color:#ddd; font-family: monospace; font-size:13px; background: rgba(0,0,0,0.25); padding:8px; border-radius:6px; z-index: 1000;}
-  </style>
+    <meta charset="utf-8">
+    <title>Match 3 Puzzle - Vanilla Canvas</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            background: #1e1e2a;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: monospace;
+        }
+        
+        #gameContainer {
+            position: relative;
+            width: 600px;
+            height: 700px;
+            background: #111;
+            border: 2px solid #444;
+        }
+        
+        canvas {
+            display: block;
+            background: #1e1e2a;
+        }
+        
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #fff;
+            font-size: 16px;
+        }
+        
+        #title {
+            font-size: 24px;
+            font-weight: bold;
+            color: #55ff55;
+            margin-bottom: 10px;
+        }
+        
+        #score, #moves {
+            color: #55ff55;
+            margin: 5px 0;
+        }
+        
+        #moves {
+            color: #5555ff;
+        }
+        
+        #resetBtn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            background: #444;
+            color: #fff;
+            border: 1px solid #666;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: monospace;
+            font-size: 16px;
+            transition: all 0.2s;
+        }
+        
+        #resetBtn:hover {
+            background: #666;
+            border-color: #888;
+        }
+        
+        #resetBtn:active {
+            background: #333;
+        }
+        
+        .hint {
+            position: absolute;
+            right: 20px;
+            bottom: 20px;
+            color: #aaa;
+            font-size: 12px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 4px;
+            max-width: 200px;
+            text-align: center;
+        }
+    </style>
 </head>
 <body>
-  <div class="hint">Click tiles to select, then click adjacent tile to swap</div>
+    <div id="gameContainer">
+        <canvas id="gameCanvas" width="600" height="700"></canvas>
+        
+        <div id="ui">
+            <div id="title">Match 3 Puzzle</div>
+            <div id="score">Score: 0</div>
+            <div id="moves">Moves: 0</div>
+        </div>
+        
+        <button id="resetBtn">Reset</button>
+        <div class="hint">Click tiles to select, click adjacent tile to swap</div>
+    </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+    <script>
+        // =====================================================
+        // CANVAS SETUP
+        // =====================================================
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        console.log('✅ Match 3 Game Canvas initialized');
 
-  <!-- REGION:SCENE_CLASS_START -->
-  <script>
-  class PuzzleScene extends Phaser.Scene {
-    constructor() { super('PuzzleScene'); }
-    
-    preload() {}
-    
-    create() {
-      this.tileSize = 64;
-      this.cols = 8;
-      this.rows = 8;
-      this.offsetX = 100;
-      this.offsetY = 100;
-      this.colors = [0xff5555, 0x55ff55, 0x5555ff, 0xffff55, 0xff55ff];
-      this.grid = [];
-      this.selected = null;
-      this.isProcessing = false;
+        // =====================================================
+        // GAME STATE (✅ MODIFY THESE VALUES)
+        // =====================================================
+        const game = {
+            tileSize: 64,
+            cols: 8,
+            rows: 8,
+            offsetX: 50,
+            offsetY: 120,
+            
+            colors: [
+                '#ff5555',  // Red
+                '#55ff55',  // Green
+                '#5555ff',  // Blue
+                '#ffff55',  // Yellow
+                '#ff55ff'   // Magenta
+            ],
+            
+            grid: [],
+            selected: null,
+            isProcessing: false,
+            
+            score: 0,
+            moves: 0,
+            
+            animatingTiles: new Map()
+        };
 
-      this.createGrid();
-      this.input.on('pointerdown', this.handlePointer, this);
-
-      this.score = 0;
-      this.moves = 0;
-      this.createUI();
-      
-      // Initial check for matches
-      this.time.delayedCall(100, () => this.checkAndRemoveMatches());
-    }
-
-    update() {}
-
-    createGrid() {
-      for (let y = 0; y < this.rows; y++) {
-        this.grid[y] = [];
-        for (let x = 0; x < this.cols; x++) {
-          this.grid[y][x] = this.createTile(x, y);
+        // =====================================================
+        // TILE OBJECT
+        // =====================================================
+        class Tile {
+            constructor(x, y, color) {
+                this.gridX = x;
+                this.gridY = y;
+                this.color = color;
+                this.x = game.offsetX + x * game.tileSize + game.tileSize / 2;
+                this.y = game.offsetY + y * game.tileSize + game.tileSize / 2;
+                this.scale = 1;
+                this.alpha = 1;
+                this.isAnimating = false;
+            }
+            
+            draw() {
+                ctx.save();
+                ctx.globalAlpha = this.alpha;
+                
+                // Draw shadow
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+                ctx.fillRect(
+                    this.x - (game.tileSize - 4) / 2 * this.scale + 2,
+                    this.y - (game.tileSize - 4) / 2 * this.scale + 2,
+                    (game.tileSize - 4) * this.scale,
+                    (game.tileSize - 4) * this.scale
+                );
+                
+                // Draw tile
+                ctx.fillStyle = this.color;
+                ctx.fillRect(
+                    this.x - (game.tileSize - 4) / 2 * this.scale,
+                    this.y - (game.tileSize - 4) / 2 * this.scale,
+                    (game.tileSize - 4) * this.scale,
+                    (game.tileSize - 4) * this.scale
+                );
+                
+                // Draw border if selected
+                if (this === game.selected) {
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 3;
+                    ctx.strokeRect(
+                        this.x - (game.tileSize - 4) / 2 * this.scale,
+                        this.y - (game.tileSize - 4) / 2 * this.scale,
+                        (game.tileSize - 4) * this.scale,
+                        (game.tileSize - 4) * this.scale
+                    );
+                }
+                
+                ctx.restore();
+            }
         }
-      }
-    }
 
-    createTile(x, y) {
-      const color = Phaser.Utils.Array.GetRandom(this.colors);
-      const tile = this.add.rectangle(
-        this.offsetX + x * this.tileSize,
-        this.offsetY + y * this.tileSize,
-        this.tileSize - 4,
-        this.tileSize - 4,
-        color
-      ).setInteractive();
-      
-      tile.colorValue = color;
-      tile.gridX = x;
-      tile.gridY = y;
-      
-      return tile;
-    }
-
-    handlePointer(pointer) {
-      if (this.isProcessing) return;
-      
-      const x = Math.floor((pointer.x - this.offsetX) / this.tileSize);
-      const y = Math.floor((pointer.y - this.offsetY) / this.tileSize);
-      
-      if (x < 0 || y < 0 || x >= this.cols || y >= this.rows) return;
-
-      const tile = this.grid[y][x];
-      if (!tile) return;
-
-      if (!this.selected) {
-        this.selected = tile;
-        tile.setStrokeStyle(4, 0xffffff);
-      } else {
-        if (this.areAdjacent(this.selected, tile)) {
-          this.selected.setStrokeStyle(0);
-          this.swapTiles(this.selected, tile);
-        } else {
-          this.selected.setStrokeStyle(0);
-          this.selected = tile;
-          tile.setStrokeStyle(4, 0xffffff);
+        // =====================================================
+        // GAME FUNCTIONS
+        // =====================================================
+        function createGrid() {
+            game.grid = [];
+            for (let y = 0; y < game.rows; y++) {
+                game.grid[y] = [];
+                for (let x = 0; x < game.cols; x++) {
+                    const color = game.colors[Math.floor(Math.random() * game.colors.length)];
+                    game.grid[y][x] = new Tile(x, y, color);
+                }
+            }
+            
+            // Remove initial matches
+            removeInitialMatches();
         }
-      }
-    }
 
-    areAdjacent(a, b) {
-      const dx = Math.abs(a.gridX - b.gridX);
-      const dy = Math.abs(a.gridY - b.gridY);
-      return (dx === 1 && dy === 0) || (dx === 0 && dy === 1);
-    }
-
-    swapTiles(tileA, tileB) {
-      this.isProcessing = true;
-      
-      // Store original grid positions
-      const ax = tileA.gridX;
-      const ay = tileA.gridY;
-      const bx = tileB.gridX;
-      const by = tileB.gridY;
-      
-      // Swap grid positions
-      tileA.gridX = bx;
-      tileA.gridY = by;
-      tileB.gridX = ax;
-      tileB.gridY = ay;
-      
-      // Update grid array using ORIGINAL positions
-      this.grid[ay][ax] = tileB;
-      this.grid[by][bx] = tileA;
-      
-      // Animate swap
-      this.tweens.add({
-        targets: tileA,
-        x: this.offsetX + bx * this.tileSize,
-        y: this.offsetY + by * this.tileSize,
-        duration: 250,
-        ease: 'Cubic.easeOut'
-      });
-      
-      this.tweens.add({
-        targets: tileB,
-        x: this.offsetX + ax * this.tileSize,
-        y: this.offsetY + ay * this.tileSize,
-        duration: 250,
-        ease: 'Cubic.easeOut',
-        onComplete: () => {
-          const matches = this.findMatches();
-          if (matches.length === 0) {
-            // No matches - swap back
-            this.swapBack(tileA, tileB);
-          } else {
-            // Valid move
-            this.moves++;
-            this.movesText.setText('Moves: ' + this.moves);
-            this.selected = null;
-            this.checkAndRemoveMatches();
-          }
+        function removeInitialMatches() {
+            let matches;
+            while ((matches = findMatches()).length > 0) {
+                matches.forEach(tile => {
+                    const color = game.colors[Math.floor(Math.random() * game.colors.length)];
+                    tile.color = color;
+                });
+            }
         }
-      });
-    }
 
-    swapBack(tileA, tileB) {
-      // Swap back grid positions
-      const tempX = tileA.gridX;
-      const tempY = tileA.gridY;
-      tileA.gridX = tileB.gridX;
-      tileA.gridY = tileB.gridY;
-      tileB.gridX = tempX;
-      tileB.gridY = tempY;
-      
-      // Update grid
-      this.grid[tileA.gridY][tileA.gridX] = tileA;
-      this.grid[tileB.gridY][tileB.gridX] = tileB;
-      
-      // Animate back
-      this.tweens.add({
-        targets: tileA,
-        x: this.offsetX + tileA.gridX * this.tileSize,
-        y: this.offsetY + tileA.gridY * this.tileSize,
-        duration: 250,
-        ease: 'Cubic.easeOut'
-      });
-      
-      this.tweens.add({
-        targets: tileB,
-        x: this.offsetX + tileB.gridX * this.tileSize,
-        y: this.offsetY + tileB.gridY * this.tileSize,
-        duration: 250,
-        ease: 'Cubic.easeOut',
-        onComplete: () => {
-          this.selected = null;
-          this.isProcessing = false;
+        function handleCanvasClick(e) {
+            if (game.isProcessing) return;
+            
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            
+            const x = Math.floor((mouseX - game.offsetX) / game.tileSize);
+            const y = Math.floor((mouseY - game.offsetY) / game.tileSize);
+            
+            if (x < 0 || y < 0 || x >= game.cols || y >= game.rows) return;
+            
+            const tile = game.grid[y][x];
+            if (!tile) return;
+            
+            if (!game.selected) {
+                game.selected = tile;
+                console.log('Selected tile at', x, y);
+            } else {
+                if (areAdjacent(game.selected, tile)) {
+                    swapTiles(game.selected, tile);
+                } else {
+                    game.selected = tile;
+                    console.log('New selection at', x, y);
+                }
+            }
         }
-      });
-    }
 
-    findMatches() {
-      let matches = new Set();
-      
-      // Check horizontal matches
-      for (let y = 0; y < this.rows; y++) {
-        for (let x = 0; x < this.cols - 2; x++) {
-          const t1 = this.grid[y][x];
-          const t2 = this.grid[y][x + 1];
-          const t3 = this.grid[y][x + 2];
-          
-          if (t1 && t2 && t3 && 
-              t1.colorValue === t2.colorValue && 
-              t2.colorValue === t3.colorValue) {
-            matches.add(t1);
-            matches.add(t2);
-            matches.add(t3);
-          }
+        function areAdjacent(a, b) {
+            const dx = Math.abs(a.gridX - b.gridX);
+            const dy = Math.abs(a.gridY - b.gridY);
+            return (dx === 1 && dy === 0) || (dx === 0 && dy === 1);
         }
-      }
-      
-      // Check vertical matches
-      for (let x = 0; x < this.cols; x++) {
-        for (let y = 0; y < this.rows - 2; y++) {
-          const t1 = this.grid[y][x];
-          const t2 = this.grid[y + 1][x];
-          const t3 = this.grid[y + 2][x];
-          
-          if (t1 && t2 && t3 && 
-              t1.colorValue === t2.colorValue && 
-              t2.colorValue === t3.colorValue) {
-            matches.add(t1);
-            matches.add(t2);
-            matches.add(t3);
-          }
+
+        function swapTiles(tileA, tileB) {
+            game.isProcessing = true;
+            
+            const ax = tileA.gridX;
+            const ay = tileA.gridY;
+            const bx = tileB.gridX;
+            const by = tileB.gridY;
+            
+            // Swap in grid
+            game.grid[ay][ax] = tileB;
+            game.grid[by][bx] = tileA;
+            
+            // Swap grid positions
+            tileA.gridX = bx;
+            tileA.gridY = by;
+            tileB.gridX = ax;
+            tileB.gridY = ay;
+            
+            // Animate swap
+            animateTile(tileA, tileA.x, tileA.y, game.offsetX + bx * game.tileSize + game.tileSize / 2, game.offsetY + by * game.tileSize + game.tileSize / 2, 250);
+            
+            setTimeout(() => {
+                animateTile(tileB, tileB.x, tileB.y, game.offsetX + ax * game.tileSize + game.tileSize / 2, game.offsetY + ay * game.tileSize + game.tileSize / 2, 250);
+            }, 125);
+            
+            setTimeout(() => {
+                const matches = findMatches();
+                if (matches.length === 0) {
+                    // Swap back
+                    game.grid[ay][ax] = tileA;
+                    game.grid[by][bx] = tileB;
+                    
+                    tileA.gridX = ax;
+                    tileA.gridY = ay;
+                    tileB.gridX = bx;
+                    tileB.gridY = by;
+                    
+                    animateTile(tileA, tileA.x, tileA.y, game.offsetX + ax * game.tileSize + game.tileSize / 2, game.offsetY + ay * game.tileSize + game.tileSize / 2, 250);
+                    
+                    setTimeout(() => {
+                        animateTile(tileB, tileB.x, tileB.y, game.offsetX + bx * game.tileSize + game.tileSize / 2, game.offsetY + by * game.tileSize + game.tileSize / 2, 250);
+                    }, 125);
+                    
+                    setTimeout(() => {
+                        game.selected = null;
+                        game.isProcessing = false;
+                    }, 400);
+                } else {
+                    game.moves++;
+                    document.getElementById('moves').textContent = 'Moves: ' + game.moves;
+                    game.selected = null;
+                    removeTiles(matches);
+                }
+            }, 400);
         }
-      }
-      
-      return Array.from(matches);
-    }
 
-    checkAndRemoveMatches() {
-      const matches = this.findMatches();
-      
-      if (matches.length > 0) {
-        this.removeTiles(matches);
-      } else {
-        this.isProcessing = false;
-      }
-    }
+        function findMatches() {
+            const matches = new Set();
+            
+            // Horizontal matches
+            for (let y = 0; y < game.rows; y++) {
+                for (let x = 0; x < game.cols - 2; x++) {
+                    const t1 = game.grid[y][x];
+                    const t2 = game.grid[y][x + 1];
+                    const t3 = game.grid[y][x + 2];
+                    
+                    if (t1 && t2 && t3 && t1.color === t2.color && t2.color === t3.color) {
+                        matches.add(t1);
+                        matches.add(t2);
+                        matches.add(t3);
+                    }
+                }
+            }
+            
+            // Vertical matches
+            for (let x = 0; x < game.cols; x++) {
+                for (let y = 0; y < game.rows - 2; y++) {
+                    const t1 = game.grid[y][x];
+                    const t2 = game.grid[y + 1][x];
+                    const t3 = game.grid[y + 2][x];
+                    
+                    if (t1 && t2 && t3 && t1.color === t2.color && t2.color === t3.color) {
+                        matches.add(t1);
+                        matches.add(t2);
+                        matches.add(t3);
+                    }
+                }
+            }
+            
+            return Array.from(matches);
+        }
 
-    removeTiles(matches) {
-      // Update score
-      this.score += matches.length * 10;
-      this.scoreText.setText('Score: ' + this.score);
-      
-      // Animate and remove tiles
-      matches.forEach(tile => {
-        this.tweens.add({
-          targets: tile,
-          alpha: 0,
-          scale: 0,
-          duration: 200,
-          onComplete: () => {
-            tile.destroy();
-            this.grid[tile.gridY][tile.gridX] = null;
-          }
+        function removeTiles(matches) {
+            game.score += matches.length * 10;
+            document.getElementById('score').textContent = 'Score: ' + game.score;
+            
+            // Animate removal
+            let completed = 0;
+            matches.forEach(tile => {
+                animateTile(tile, tile.x, tile.y, tile.x, tile.y, 200, () => {
+                    tile.alpha = 0;
+                    tile.scale = 0;
+                    game.grid[tile.gridY][tile.gridX] = null;
+                    completed++;
+                    
+                    if (completed === matches.length) {
+                        setTimeout(dropTiles, 100);
+                    }
+                });
+            });
+        }
+
+        function dropTiles() {
+            let hasMoved = false;
+            
+            for (let x = 0; x < game.cols; x++) {
+                let emptySpaces = 0;
+                
+                // Count empty spaces and move tiles down
+                for (let y = game.rows - 1; y >= 0; y--) {
+                    if (game.grid[y][x] === null) {
+                        emptySpaces++;
+                    } else if (emptySpaces > 0) {
+                        const tile = game.grid[y][x];
+                        const newY = y + emptySpaces;
+                        
+                        game.grid[y][x] = null;
+                        game.grid[newY][x] = tile;
+                        
+                        tile.gridY = newY;
+                        
+                        animateTile(tile, tile.x, tile.y, game.offsetX + x * game.tileSize + game.tileSize / 2, game.offsetY + newY * game.tileSize + game.tileSize / 2, 300);
+                        hasMoved = true;
+                    }
+                }
+                
+                // Fill empty spaces at top
+                for (let y = 0; y < game.rows; y++) {
+                    if (game.grid[y][x] === null) {
+                        const color = game.colors[Math.floor(Math.random() * game.colors.length)];
+                        const newTile = new Tile(x, y, color);
+                        newTile.y = game.offsetY - game.tileSize;
+                        newTile.alpha = 0;
+                        game.grid[y][x] = newTile;
+                        
+                        animateTile(newTile, newTile.x, newTile.y, game.offsetX + x * game.tileSize + game.tileSize / 2, game.offsetY + y * game.tileSize + game.tileSize / 2, 300, () => {
+                            newTile.alpha = 1;
+                        });
+                        hasMoved = true;
+                    }
+                }
+            }
+            
+            if (hasMoved) {
+                setTimeout(() => checkForMatches(), 350);
+            } else {
+                game.isProcessing = false;
+            }
+        }
+
+        function checkForMatches() {
+            const matches = findMatches();
+            if (matches.length > 0) {
+                removeTiles(matches);
+            } else {
+                game.isProcessing = false;
+            }
+        }
+
+        function animateTile(tile, fromX, fromY, toX, toY, duration, onComplete) {
+            const startTime = Date.now();
+            const update = () => {
+                const elapsed = Date.now() - startTime;
+                const progress = Math.min(elapsed / duration, 1);
+                
+                tile.x = fromX + (toX - fromX) * progress;
+                tile.y = fromY + (toY - fromY) * progress;
+                
+                if (progress < 1) {
+                    requestAnimationFrame(update);
+                } else {
+                    tile.x = toX;
+                    tile.y = toY;
+                    if (onComplete) onComplete();
+                }
+            };
+            update();
+        }
+
+        // =====================================================
+        // RENDERING
+        // =====================================================
+        function draw() {
+            ctx.fillStyle = '#1e1e2a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw grid background
+            ctx.fillStyle = '#111';
+            ctx.fillRect(
+                game.offsetX - 5,
+                game.offsetY - 5,
+                game.cols * game.tileSize + 10,
+                game.rows * game.tileSize + 10
+            );
+            
+            // Draw grid lines
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 1;
+            for (let x = 0; x <= game.cols; x++) {
+                ctx.beginPath();
+                ctx.moveTo(game.offsetX + x * game.tileSize, game.offsetY);
+                ctx.lineTo(game.offsetX + x * game.tileSize, game.offsetY + game.rows * game.tileSize);
+                ctx.stroke();
+            }
+            for (let y = 0; y <= game.rows; y++) {
+                ctx.beginPath();
+                ctx.moveTo(game.offsetX, game.offsetY + y * game.tileSize);
+                ctx.lineTo(game.offsetX + game.cols * game.tileSize, game.offsetY + y * game.tileSize);
+                ctx.stroke();
+            }
+            
+            // Draw tiles
+            for (let y = 0; y < game.rows; y++) {
+                for (let x = 0; x < game.cols; x++) {
+                    const tile = game.grid[y][x];
+                    if (tile) {
+                        tile.draw();
+                    }
+                }
+            }
+        }
+
+        // =====================================================
+        // GAME LOOP
+        // =====================================================
+        function gameLoop() {
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // =====================================================
+        // EVENT LISTENERS
+        // =====================================================
+        canvas.addEventListener('click', handleCanvasClick);
+        
+        document.getElementById('resetBtn').addEventListener('click', () => {
+            game.score = 0;
+            game.moves = 0;
+            game.selected = null;
+            game.isProcessing = false;
+            document.getElementById('score').textContent = 'Score: 0';
+            document.getElementById('moves').textContent = 'Moves: 0';
+            createGrid();
         });
-      });
-      
-      // Wait for removal animation then drop tiles
-      this.time.delayedCall(250, () => this.dropTiles());
-    }
 
-    dropTiles() {
-      let hasMoved = false;
-      
-      // Drop tiles from bottom to top
-      for (let x = 0; x < this.cols; x++) {
-        let emptySpaces = 0;
-        
-        for (let y = this.rows - 1; y >= 0; y--) {
-          if (this.grid[y][x] === null) {
-            emptySpaces++;
-          } else if (emptySpaces > 0) {
-            // Move tile down
-            const tile = this.grid[y][x];
-            const newY = y + emptySpaces;
-            
-            this.grid[y][x] = null;
-            this.grid[newY][x] = tile;
-            tile.gridY = newY;
-            
-            this.tweens.add({
-              targets: tile,
-              y: this.offsetY + newY * this.tileSize,
-              duration: 300,
-              ease: 'Bounce.easeOut'
-            });
-            
-            hasMoved = true;
-          }
-        }
-        
-        // Fill empty spaces at top
-        for (let y = 0; y < this.rows; y++) {
-          if (this.grid[y][x] === null) {
-            const newTile = this.createTile(x, y);
-            newTile.setAlpha(0);
-            newTile.y = this.offsetY - this.tileSize;
-            this.grid[y][x] = newTile;
-            
-            this.tweens.add({
-              targets: newTile,
-              y: this.offsetY + y * this.tileSize,
-              alpha: 1,
-              duration: 300,
-              ease: 'Bounce.easeOut'
-            });
-            
-            hasMoved = true;
-          }
-        }
-      }
-      
-      // Check for new matches after drop
-      if (hasMoved) {
-        this.time.delayedCall(350, () => this.checkAndRemoveMatches());
-      } else {
-        this.isProcessing = false;
-      }
-    }
-
-    createUI() {
-      this.add.text(20, 20, 'Match 3 Puzzle', { 
-        fontFamily: 'monospace', 
-        fontSize: 24, 
-        color: '#fff',
-        fontStyle: 'bold'
-      });
-      
-      this.scoreText = this.add.text(20, 55, 'Score: 0', { 
-        fontFamily: 'monospace', 
-        fontSize: 18, 
-        color: '#55ff55'
-      });
-      
-      this.movesText = this.add.text(20, 80, 'Moves: 0', { 
-        fontFamily: 'monospace', 
-        fontSize: 18, 
-        color: '#5555ff'
-      });
-      
-      const resetBtn = this.add.text(520, 20, 'Reset', {
-        fontFamily: 'monospace',
-        fontSize: 18,
-        color: '#fff',
-        backgroundColor: '#444',
-        padding: { x: 12, y: 6 }
-      }).setInteractive();
-      
-      resetBtn.on('pointerdown', () => this.scene.restart());
-      resetBtn.on('pointerover', () => resetBtn.setStyle({ backgroundColor: '#666' }));
-      resetBtn.on('pointerout', () => resetBtn.setStyle({ backgroundColor: '#444' }));
-    }
-  }
-  </script>
-  <!-- REGION:SCENE_CLASS_END -->
-
-  <!-- REGION:CONFIG_START -->
-  <script>
-  const config = {
-    type: Phaser.AUTO,
-    width: 600,
-    height: 700,
-    backgroundColor: 0x1e1e2a,
-    scene: [PuzzleScene]
-  };
-  </script>
-  <!-- REGION:CONFIG_END -->
-
-  <!-- REGION:GAME_INIT_START -->
-  <script>
-  window.onload = () => {
-    const game = new Phaser.Game(config);
-  };
-  </script>
-  <!-- REGION:GAME_INIT_END -->
-
+        // =====================================================
+        // INIT
+        // =====================================================
+        createGrid();
+        console.log('🎮 Match 3 Game Started!');
+        requestAnimationFrame(gameLoop);
+    </script>
 </body>
 </html>
